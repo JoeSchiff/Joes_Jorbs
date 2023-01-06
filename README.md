@@ -1,4 +1,4 @@
-# Joes_Jorbs
+# Joes Jorbs
 Search for jobs in New York State's Civil Service, public schools, and colleges.
 
 <br/>
@@ -9,15 +9,15 @@ Code dump for http://joesjorbs.com
 
 ### Scraper features:
 * asyncio
-* playwright
+* Playwright
+* retry requests on recoverable errors
 * fallback to static requests
-* save and resume progress
 * skip checked pages
 * domain and rate limits
-* retry request on recoverable errors
+* crawl links if they likely contain relevant content
+* save and resume progress
 * auto blacklist
 * errorlog with summary
-* crawl links if they likely contain relevant content
 * monitor network connection with ping
 * upload to remote server
 
