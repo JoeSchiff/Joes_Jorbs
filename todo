@@ -5,6 +5,7 @@ pickle.dump() start giving "maximum recursion depth exceeded while calling a Pyt
 
 
 todo:
+separate jbw count and write file
 logging module
   always print task id
   must include stderr
