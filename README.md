@@ -1,19 +1,9 @@
 # Joes_Jorbs
-Search for jobs in New York State's Civil Service, public schools, charter schools, colleges, and universities.
+Search for jobs in New York State's Civil Service, public schools, and colleges.
 
 <br/>
 Code dump for http://joesjorbs.com
 
-<br/><br/>
-
-### Todo:
-* implement logging module\
-&nbsp;always print task id
-* respect robots.txt\
-&nbsp;default useragent
-domain wide jbw conf. Once high conf is established, ignore low conf links for that domain
-auto update dbs by sorting jbw conf from scraper
-pw ping
 
 <br/><br/>
 
