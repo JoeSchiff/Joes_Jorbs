@@ -5,6 +5,9 @@ pickle.dump() start giving "maximum recursion depth exceeded while calling a Pyt
 
 
 todo:
+logging module
+  always print task id
+  must include stderr
 handle timeouts uniformly +
   check async timeout again
 iso date format +
@@ -14,6 +17,7 @@ respect robots.txt
   after success req: update timestamp and domain count +
     after any req? not just success?
   call proceed_f on initial urls?
+  default useragent
   use 2 useragents to see difference?
   pass rp into working_o?
   implement domain rate limiter +
@@ -26,6 +30,9 @@ respect robots.txt
 auto blacklist +
     blacklist is dup urls +
     must be exact match, not domain. ex: 5il.co != 5il.co/page3
+domain-wide jbw conf. Once high conf is established, ignore low conf links for that domain
+auto update dbs urls by sorting jbw conf from scraper
+  this wont get new orgs, only new em urls
 pagination class never works. test 'next' or '>' test +
 urls ending in .pdf are not detected by bunkwords because period is percent encoded: https://www.bville.org/tfiles/folder99/reference%20letter%2Epdf +
 set playwright user agent?
