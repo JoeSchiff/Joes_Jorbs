@@ -7,7 +7,7 @@ Code dump for http://joesjorbs.com
 
 <br/><br/>
 
-### Scraper features:
+## Scraper features:
 * asyncio
 * Playwright
 * retry requests on recoverable errors
