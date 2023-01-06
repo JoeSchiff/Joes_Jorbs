@@ -23,7 +23,7 @@ Code dump for http://joesjorbs.com
 
 <br/><br/>
 
-### Scraper overview:
+## Scraper overview:
 The program begins by initializing the queue with URLs from the database. The database stores the name of the organization, the portal URL (the webpage most likely to contain job postings on that domain), and the domain homepage (to be used as a fallback if the portal fails). Relevant data stored with these URL objects is updated as the scrape progresses.
 
 Asyncio tasks are then created and begin pulling URL objects from the queue in parallel.
@@ -52,7 +52,7 @@ When all tasks report the queue is empty then an errorlog summary is displayed, 
 
 <br/><br/>
 
-### Website overview:
+## Website overview:
 The webserver has the text results from the scraper. The results are stored in a directory tree containing text files which store the visible text scraped from each webpage. 
 
 The homepage takes the job title supplied by the user and searches through the results looking for a match in each text file. 
