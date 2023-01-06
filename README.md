@@ -24,9 +24,10 @@ Code dump for http://joesjorbs.com
 <br/><br/>
 
 ### Scraper overview:
-The program begins by initializing the queue with URLs from the database. The database stores the name of the organization, the portal URL (the webpage most likely to contain job postings on that domain), and the domain homepage (to be used as a fallback if the portal fails). Relevant data stored with these URL objects is updated as the scrape progresses.\
+The program begins by initializing the queue with URLs from the database. The database stores the name of the organization, the portal URL (the webpage most likely to contain job postings on that domain), and the domain homepage (to be used as a fallback if the portal fails). Relevant data stored with these URL objects is updated as the scrape progresses.
 
-Asyncio tasks are then created and begin pulling URL objects from the queue in parallel.\
+Asyncio tasks are then created and begin pulling URL objects from the queue in parallel.
+
 URLs are screened prior to being requested. The robots.txt file for that domain is consulted and respected.\
 Playwright is used for the URL request so that Javascript/dynamic content is included. This ensures the data scraped is identical to what a human user would see. All iframes are recursively requested and scraped.\
 If a Playwright error is detected, then the scraper will attempt the request using urllib.\
