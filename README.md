@@ -46,7 +46,7 @@ The homepage takes the job title supplied by the user and searches through the r
 Possible matches are filtered based on the user's options. \
 GIS coordinates are stored for every organization used in the scraper and every ZIP code in the state. Geographic distance is calculated by comparing these two points on a sphere the size of the Earth (adjusted for oblateness found at NYS latitude).\
 These functions are completed by a CGI Python script.
-
+More info can be found at: http://joesjorbs.com/help.html
 
 
 <br/><br/><br/><br/>
