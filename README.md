@@ -25,6 +25,7 @@ Code dump for http://joesjorbs.com
 
 ### Scraper overview:
 The program begins by initializing the queue with URLs from the database. The database stores the name of the organization, the portal URL (the webpage most likely to contain job postings on that domain), and the domain homepage (to be used as a fallback if the portal fails). Relevant data stored with these URL objects is updated as the scrape progresses.\
+
 Asyncio tasks are then created and begin pulling URL objects from the queue in parallel.\
 URLs are screened prior to being requested. The robots.txt file for that domain is consulted and respected.\
 Playwright is used for the URL request so that Javascript/dynamic content is included. This ensures the data scraped is identical to what a human user would see. All iframes are recursively requested and scraped.\
@@ -45,7 +46,7 @@ The webserver has the text results from the scraper. The results are stored in a
 The homepage takes the job title supplied by the user and searches through the results looking for a match in each text file. \
 Possible matches are filtered based on the user's options. \
 GIS coordinates are stored for every organization used in the scraper and every ZIP code in the state. Geographic distance is calculated by comparing these two points on a sphere the size of the Earth (adjusted for oblateness found at NYS latitude).\
-These functions are completed by a CGI Python script.
+These functions are completed by a CGI Python script.\
 More info can be found at: http://joesjorbs.com/help.html
 
 
