@@ -1,30 +1,24 @@
 
 errors:
-pickle.dump() start giving "maximum recursion depth exceeded while calling a Python object
-Future exception was never retrieved. usually preceded by looper timeout __error
-future: <Future finished exception=Error('Target page, context or browser has been closed') created at /usr/lib/python3.10/asyncio/base_events.py:429
-Segmentation fault (core dumped): caused by printing asyncio.all_tasks()  wtf?
-handle robot.txt req errors
-handle timeouts uniformly +
-  check async timeout again
-fresh context per page +
-playwright sync?
+pickle.dump() start giving "maximum recursion depth exceeded while calling a Python object +
+
 
 
 todo:
+handle timeouts uniformly +
+  check async timeout again
 iso date format +
-replace newlines in links with a space +
 respect robots.txt
   check robots.txt once per domain +
   before each req: check rp. if doesnt exist create domain key +
   after success req: update timestamp and domain count +
-  after any req? not just success?
+    after any req? not just success?
   call proceed_f on initial urls?
   use 2 useragents to see difference?
   pass rp into working_o?
-  implement domain rate limiter
+  implement domain rate limiter +
       include timestamp of last req for that domain +
-        dict of domains: obj as value?
+        dict of domains: obj as value? +
         save and recover
         global default rate limiter also
     why class? use attributes not dict +
@@ -36,19 +30,14 @@ pagination class never works. test 'next' or '>' test +
 urls ending in .pdf are not detected by bunkwords because period is percent encoded: https://www.bville.org/tfiles/folder99/reference%20letter%2Epdf +
 set playwright user agent?
 all (working_o) funcs as class methods
-different working_o classes:
+different working_o classes: -
     before req: add_to_queue
     during: add_html, vis_soup_f, pw_req, static_req, child_frame
     after: fallback_success, check_red, check_vis_text, write_results, crawler
     errors? anytime?
     before and after are same. loop is a circle
-can use: asyncio.current_task() instead of passing task id? -
 use asyncio.Event() instead of blocking: all_done_d,l pw_pause, asyncio.sleep
-jsnode OOM. try: export NODE_OPTIONS="--max-old-space-size=4096" +
 net::ERR_NAME_NOT_RESOLVED should also be 404
-proper logging module because stderr is not logged
-  not all output (stderr?) going to file
-  auto prant task id
 call crawler from add_html method?
 all pause for static if bash ping fails
 include error result in working_o?
@@ -63,11 +52,7 @@ dont have sync and async versions of dup_check and checked_entry +
 why use methods?
 check for malformed urls? >>> r=urlparse('http:/joesjorbs.com') >>> if r.scheme and r.netloc: print(99)
 rewrite crawler
-this scraper and search for new/updated urls (winter project) should be one?
-
-looper timeout __error then pipe closed by peer or os.write(pipe, data) raised exception. +
 prog count higher than total
-restarting first pw browser doesnt reclaim memory. try firefox first?
 remove multiorg? results.py doesnt show duplicate urls
 all pause +
   how check? start with pw then fallback to bash ping? pw > ping url > ping ip
@@ -94,11 +79,11 @@ properly track skipped pages?
 put skipped pages into cml? might give dups
 "application" as bunkword?
 use empty list placeholder for jj_final_error and fallback_success in errorlog?
+errorlog as json?
 sort results to either regular dir or empty vis text dir (for debugging)
 fallback to domain after homeurl fallback?
 mark all nonlogged errors with underscore or remove try block
 use both a domain limiter and a limiter based on full url (except query)?
-do not count jj_error 2 (forbidden content type) as error. mark as skip -
 create unique codes for all skips. print and mark in cml
 improve bunkwords: mark all skips in outcome. dont use list comprehension? print offending bunkword and context
 
@@ -132,7 +117,7 @@ no error will be displayed if failed to read vis text file
 index.html to do:
 dup zip codes
 fix indents
-obfuscate
+obfuscate -
 improve code comments
 zip_dict one entry per line?
 hide modal after back button without refresh - difficult
@@ -200,13 +185,4 @@ url_path = parse.quote(workingurl, safe=':')
  
 
 
- overview:
-initialize queue
-start asyncio event loop: asyncio.run(main())
-create tasks: asyncio.create_task(looper_f)
-get url from queue and choose requester
-get html
-check redirected url, soft 404, etc
-write results
-crawl for links
-put urls into queue and repeat
+ 
