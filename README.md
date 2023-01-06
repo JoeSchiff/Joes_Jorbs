@@ -43,7 +43,7 @@ When all tasks report the queue is empty then an errorlog summary is displayed, 
 ### Website overview:
 The webserver has the text results from the scraper. The results are stored in a directory tree containing text files which store the visible text scraped from each webpage. \
 The homepage takes the job title supplied by the user and searches through the results looking for a match in each text file. \
-Positive matches are filtered based on the user's options. \
+Possible matches are filtered based on the user's options. \
 GIS coordinates are stored for every organization used in the scraper and every ZIP code in the state. Geographic distance is calculated by comparing these two points on a sphere the size of the Earth (adjusted for oblateness found at NYS latitude).\
 These functions are completed by a CGI Python script.
 
