@@ -103,7 +103,7 @@ class working_c:
         self.jbw_type = jbw_type
         self.workingurl_dup = workingurl_dup
         self.req_attempt_num = req_attempt_num
-        self.domain = '://'.join(parse.urlparse(workingurl)[:2])  # Scheme and domain (with www). Used for building abspaths from rel links
+        self.domain = '://'.join(parse.urlparse(workingurl)[:2])  # Includes scheme and www. Used for building abspaths from rel links
         self.dup_domain = workingurl_dup.split('/')[0]  # Used for domain limiter
 
     # After successful request
@@ -116,7 +116,7 @@ class working_c:
         prant('added html:', red_url)
 
     def __str__(self):
-        return f'{self.org_name} {self.workingurl} {self.current_crawl_level} {self.parent_url} {self.jbw_type} {self.workingurl_dup} {self.req_attempt_num}'
+        return f'{self.org_name} {self.workingurl} {self.current_crawl_level} {self.parent_url} {self.jbw_type} {self.workingurl_dup} {self.req_attempt_num} {self.domain} {self.dup_domain}'
 
     def clean_return(self):
         return self.org_name, self.workingurl, self.current_crawl_level, self.parent_url, self.jbw_type, self.workingurl_dup, self.req_attempt_num
@@ -184,7 +184,7 @@ class working_c:
                 s_checked_entry_f(self.workingurl_dup, conf_val, self.browser)
 
                 # Skip checked pages using redirected URL
-                return proceed_f(self.red_url, red_url_dup)
+                return proceed_f(self.red_url)
 
         # Return True on all other results
         return True
@@ -215,9 +215,8 @@ class working_c:
         else:
             return True
 
-
-    # Save webpage vis text to file
-    async def write_results(self):
+    # Determine confidence that a page has job postings
+    def count_jbws_f(self):
 
         # Select jbw lists
         if self.jbw_type == 'civ':
@@ -234,35 +233,44 @@ class working_c:
         for i in jobwords_high_conf:
             if i in self.vis_text: jbw_count += 2
 
+        return jbw_count
+
+
+    # Save webpage vis text to file
+    async def write_results(self):
+
+        jbw_count = self.count_jbws_f()
+
         # Update outcome in checked_urls_d
         s_checked_entry_f(self.workingurl_dup, jbw_count, self.browser)
 
         ## combine this with fallback detection earlier?
         # Save results unless this a fallback homepage
-        if self.current_crawl_level > -1:
+        if self.current_crawl_level < 0:
+            return
 
-            # Make jbw type dirs inside date dir
-            dated_results_path = os.path.join(dater_path, 'results', self.jbw_type)
-            if not os.path.exists(dated_results_path):
-                os.makedirs(dated_results_path)
+        # Make jbw type dirs inside date dir
+        dated_results_path = os.path.join(dater_path, 'results', self.jbw_type)
+        if not os.path.exists(dated_results_path):
+            os.makedirs(dated_results_path)
 
-            # Make directory using org name
-            org_path = os.path.join(dated_results_path, self.org_name)
-            if not os.path.exists(org_path):
-                os.makedirs(org_path)
+        # Make directory using org name
+        org_path = os.path.join(dated_results_path, self.org_name)
+        if not os.path.exists(org_path):
+            os.makedirs(org_path)
 
-            # Replace forward slashes so they aren't read as directory boundaries
-            ## alternative: url_path = workingurl.replace('/', '%2F')
-            url_path = parse.quote(self.workingurl, safe=':')
-            html_path = os.path.join(org_path, url_path)
+        # Replace forward slashes so they aren't read as directory boundaries
+        ## alternative: url_path = workingurl.replace('/', '%2F')
+        url_path = parse.quote(self.workingurl, safe=':')
+        html_path = os.path.join(org_path, url_path)
 
-            # Combine jbw conf, browser, and vis text into a str. Separate by ascii delim char
-            file_contents_s = str(jbw_count) + '\x1f' + self.browser + '\x1f' + self.vis_text
+        # Combine jbw conf, browser, and vis text into a str. Separate by ascii delim char
+        file_contents_s = str(jbw_count) + '\x1f' + self.browser + '\x1f' + self.vis_text
 
-            # Write HTML to text file using url name (max length is 255)
-            with open(html_path[:254], "w", encoding='ascii', errors='ignore') as write_html:
-                write_html.write(file_contents_s)
-            prant('Success: Write:', url_path)
+        # Write HTML to text file using url name (max length is 255)
+        async with open(html_path[:254], "w", encoding='ascii', errors='ignore') as write_html:
+            write_html.write(file_contents_s)
+        prant('Success: Write:', url_path)
 
 
 
@@ -309,7 +317,8 @@ def s_checked_entry_f(url_dup, *args):
 
 
 # Return False if url has been requested already
-def proceed_f(url, url_dup):
+def proceed_f(url):
+    url_dup = s_dup_checker_f(url)
 
     # Exclude checked pages
     if url_dup in checked_urls_d:
@@ -345,22 +354,28 @@ def proceed_f(url, url_dup):
     domain = '://'.join(parse.urlparse(url)[:2]) 
     dup_domain = url_dup.split('/')[0]
 
-    domain_o = domain_c.get_rp(domain, dup_domain)
+    # Get domain_o
+    if dup_domain in domain_c.domain_d:
+        domain_o = domain_c.domain_d[dup_domain]
+    else:
+        domain_o = domain_c(domain, dup_domain)
 
     # Can fetch
-    if domain_o.rp:
-        if not domain_o.rp.can_fetch(user_agent_s, url):
+    if domain_o.rp and len(domain_o.rp.__str__()) > 1:
+        print(66666666, domain_o.rp.url, domain_o.rp)
+        if not domain_o.rp.can_fetch('*', url):
             prant('can not fetch:', url)
             return False
 
         # Domain rate limiter
-        time_elapsed = datetime.now().timestamp() - domain_o.last_req_ts
-        crawl_delay = domain_o.rp.crawl_delay(user_agent_s)
-        if time_elapsed < crawl_delay:
-            prant('rp crawl delay wait:', url_dup, crawl_delay, time_elapsed)
-            # put back in queue or wait
-            import time
-            time.sleep(crawl_delay - time_elapsed)
+        crawl_delay = domain_o.rp.crawl_delay('*')
+        if crawl_delay:
+            time_elapsed = datetime.now().timestamp() - domain_o.last_req_ts
+            if time_elapsed < crawl_delay:
+                prant('rp crawl delay wait:', url_dup, crawl_delay, time_elapsed)
+                # put back in queue or wait
+                import time
+                time.sleep(crawl_delay - time_elapsed)
 
     # Exclude if domain occurrence limit is exceeded
     if domain_o.domain_count > domain_limit:
@@ -376,36 +391,12 @@ def proceed_f(url, url_dup):
         return False
 
     # Declare to proceed
+
     return True
 
 
 
 
-# Recursive child frame explorer
-async def child_frame_f(frame, task_id):
-    try:
-
-        # Discard useless frames
-        if frame.name == "about:srcdoc" or frame.name == "about:blank" or not frame.url or frame.url == "about:srcdoc" or frame.url == "about:blank" or frame.is_detached():
-            return "", ""
-
-        # Current frame content
-        html = await frame.content()
-        vis_text = await frame.inner_text('body')
-
-        # Get child frame content
-        #prant('num child frames:', len(frame.child_frames), frame, task_id)
-        for c_f in frame.child_frames:
-            ret_t = await child_frame_f(c_f, task_id)
-            html += '\n' + ret_t[0]
-            vis_text += '\n' + ret_t[1]
-            prant('child frame appended:', frame.url, task_id)
-
-        return html, vis_text
-
-    except Exception as errex:
-        prant('child_frame_f __error:', errex, task_id)
-        return "", ""
 
 
 # Decide which requester to use based on number of attmepts for that URL
@@ -439,7 +430,6 @@ async def looper_f(pw, session):
             prant('got new working_list', working_o, task_id)
 
             if working_o.req_attempt_num < 3:
-                print(111111111)
                 await pw_req_f(working_o, task_id, pw)
             elif working_o.req_attempt_num < 5:
                 await asyncio.wait_for(static_req_f(working_o, task_id, session), timeout=30)
@@ -463,7 +453,7 @@ async def looper_f(pw, session):
             prant('has html:', working_o.workingurl)
             working_c.prog_count += 1
             prant('begin domain_o.update', working_o, task_id)
-            domain_o.update(working_o.domain, working_o.dup_domain)  # Inc domain_count
+            domain_c.domain_d[working_o.dup_domain].update()  # Inc domain_count
             prant('begin fallback_success', working_o, task_id)
             working_o.fallback_success()  # Check and update fallback
             prant('begin check_red', working_o, task_id)
@@ -485,20 +475,15 @@ async def looper_f(pw, session):
 # Playwright requester
 @timeout_decorator.timeout(20)
 async def pw_req_f(working_o, task_id, pw):
-    print(777777777777, task_id)
     # Select pw browser, context, and page
     stay = True
     while stay:
-
         for brow in brow_l:
             try:
-                print(2222222, task_id, brow.is_connected())
                 context = await brow.new_context(ignore_https_errors=True)
                 context.set_default_timeout(20000)
-                print('check closed1:', brow.is_connected(), context, task_id)
                 page = await context.new_page()
                 stay = False
-                print(33333333333, task_id)
                 #prant('using:', brow._impl_obj._browser_type.name, task_id)
                 break
 
@@ -521,7 +506,6 @@ async def pw_req_f(working_o, task_id, pw):
     try:
         workingurl = working_o.workingurl
         prant('start pw req:', workingurl, task_id)
-        print('check closed2:', brow.is_connected(), page.is_closed(), context, task_id)
         resp = await page.goto(workingurl)
         #await resp.finished()
         await page.wait_for_load_state('networkidle')
@@ -595,6 +579,33 @@ async def pw_req_f(working_o, task_id, pw):
         except Exception as errex:
             prant('cant close context:', errex)
         #return True  ## awaited coroutines must always return not None
+
+
+# Recursive child frame explorer
+async def child_frame_f(frame, task_id):
+    try:
+
+        # Discard useless frames
+        if frame.name == "about:srcdoc" or frame.name == "about:blank" or not frame.url or frame.url == "about:srcdoc" or frame.url == "about:blank" or frame.is_detached():
+            return "", ""
+
+        # Current frame content
+        html = await frame.content()
+        vis_text = await frame.inner_text('body')
+
+        # Get child frame content
+        #prant('num child frames:', len(frame.child_frames), frame, task_id)
+        for c_f in frame.child_frames:
+            ret_t = await child_frame_f(c_f, task_id)
+            html += '\n' + ret_t[0]
+            vis_text += '\n' + ret_t[1]
+            prant('child frame appended:', frame.url, task_id)
+
+        return html, vis_text
+
+    except Exception as errex:
+        prant('child_frame_f __error:', errex, task_id)
+        return "", ""
 
 
 # Static requester
@@ -697,18 +708,17 @@ def final_error_f(working_o):
         # If request failed on first URL (portal), use homepage as fallback
         if current_crawl_level == 0:
             prant('Using URL fallback:', parent_url)
-            homepage_dup = s_dup_checker_f(parent_url)
 
             # Put homepage url into queue with -1 current crawl level
-            if proceed_f(parent_url, homepage_dup):
+            if proceed_f(parent_url):
                 working_o.workingurl = parent_url
                 working_o.current_crawl_level = -1
                 working_o.parent_url = workingurl  ## parent of homepage fallback?
-                working_o.workingurl_dup = homepage_dup
+                working_o.workingurl_dup = s_dup_checker_f(parent_url)
                 working_o.add_to_queue()
 
     except Exception as errex:
-        prant('final_e __error:', errex, workingurl)
+        prant('final_e __error:', errex, workingurl, sys.exc_info()[2].tb_lineno)
 
 
 # Separate the visible text from HTML
@@ -757,10 +767,9 @@ def crawler_f(working_o):
                 if ii.text.lower() == 'next':  # Find "next" page url
 
                     abspath = parse.urljoin(domain, ii.get('href')) # Get absolute url
-                    url_dup = s_dup_checker_f(abspath) # Dup checker must be called prior to proceed_f
 
                     # Add to queue
-                    if proceed_f(abspath, url_dup):
+                    if proceed_f(abspath):
                         prant(workingurl, 'Adding pagination url:', abspath)
                         working_o.workingurl = abspath
                         working_o.workingurl_dup = url_dup
@@ -848,10 +857,8 @@ def crawler_f(working_o):
         prant(len(fin_urls_l), 'links from', workingurl, fin_urls_l)
         for abspath in fin_urls_l:
 
-            url_dup = s_dup_checker_f(abspath)
-
             # Add new link to queue
-            if proceed_f(abspath, url_dup):
+            if proceed_f(abspath):
                 working_o.workingurl = abspath
                 working_o.workingurl_dup = url_dup
                 working_o.parent_url = workingurl
@@ -924,6 +931,47 @@ async def clear_brows_f(pw, *args):
     res_brow_set.clear()
 
 
+# Check internet connectivity using PW on joesjorbs.com
+async def ping_begin():
+    ping_tally = 0
+    while True:
+        try:
+            prant('pw ping begin')
+            brow = brow_l[0]
+            context = await brow.new_context(ignore_https_errors=True)
+            page = await context.new_page()
+            page.set_default_timeout(5000)
+            resp = await page.goto('http://joesjorbs.com')
+            stat_code = resp.status
+            
+            # Success
+            if stat_code == 200:
+                pw_pause = False
+                prant('pw ping success')
+                return
+            else:
+                raise Exception('pw ping fail')
+
+        except Exception as errex:
+            prant('__error ping:', errex)
+            ping_tally += 1
+
+        finally:
+            try:
+                await context.close()
+            except Exception as errex:
+                prant('ping: could not close context', errex)
+
+
+        # Attempt Bash ping on PW failure
+        bash_ping_ret = await bash_ping_f()
+
+        # Restart network interface on any two errors
+        if ping_tally > 1 or bash_ping_ret != 0:
+            pw_pause = True
+            await restart_nic_f()
+
+
 # Bash ping to test internet connection
 async def bash_ping_f():
     prant("Bash ping begin")
@@ -980,11 +1028,12 @@ async def restart_nic_f():
 
 # Write shared objects to file to save progress
 print('rec1', sys.getrecursionlimit())
-sys.setrecursionlimit(50000)  # why did pickle.dump() start giving "maximum recursion depth exceeded while calling a Python object" ?
-print('rec2', sys.getrecursionlimit())
+#sys.setrecursionlimit(50000)  # why did pickle.dump() start giving "maximum recursion depth exceeded while calling a Python object" ?
+#print('rec2', sys.getrecursionlimit())
 async def save_objs_f():
+    prant('begin prog save')
     try:
-        # Pickle queue of class objs
+        # Pickle queue of working_os
         async with q_lock:
             with open(queue_path, "wb") as f:
                 pickle.dump(all_urls_q, f)
@@ -1009,10 +1058,10 @@ async def main():
     # Start Playwright and aiohttp
     timeout = aiohttp.ClientTimeout(total=8)
     async with async_playwright() as pw, aiohttp.ClientSession(timeout=timeout) as session:
-        pw_browser = await pw.chromium.launch(args=['--disable-gpu'])
+        pw_browser = await pw.chromium.launch(args=['--disable-gpu'])  # Primary browser
         brow_l.append(pw_browser)
 
-        pw_browser = await pw.firefox.launch()
+        pw_browser = await pw.firefox.launch()  # Fallback
         brow_l.append(pw_browser)
 
 
@@ -1025,7 +1074,6 @@ async def main():
 
         # Wait for scraping to finish
         skip_tally = 0
-        task_id = asyncio.current_task().get_name()
         while not all(all_done_d.values()):
 
             try:
@@ -1036,7 +1084,6 @@ async def main():
                 for t_brow in brow_l:
                     for t_con in t_brow.contexts:
                         prant(t_brow._impl_obj._browser_type.name, 'open pages:', len(t_con.pages), t_con.pages)
-                print(6767676767)
                 prant('running tasks:', len(asyncio.all_tasks()))
                 #prant('running tasks:', asyncio.all_tasks())
                 prant('len(brow_l):', len(brow_l))
@@ -1048,68 +1095,32 @@ async def main():
 
                 # Intermittent
                 if skip_tally >= 2:
-                    prant('begin prog save', task_id)
                     skip_tally = 0
 
                     # Save progress
                     await save_objs_f()
 
-
                     # Restart primary browser when mem usage is high
                     if psutil.virtual_memory()[2] > 50:
                         brow = brow_l[0]
-                        prant('Memory usage too high. Restarting browser:', brow, task_id)
+                        prant('Memory usage too high. Restarting browser:', brow)
                         await clear_brows_f(pw, brow)
 
-                    
-                    # Check internet connectivity using pw on joesjorbs.com
-                    ping_tally = 0
-                    while True:
-                        try:
-                            prant('pw ping begin')
-                            brow = brow_l[0]
-                            context = await brow.new_context(ignore_https_errors=True)
-                            page = await context.new_page()
-                            page.set_default_timeout(3000)
-                            resp = await page.goto('http://joesjorbs.com')
-                            stat_code = resp.status
-                            
-                            # Success
-                            if stat_code == 200:
-                                pw_pause = False
-                                prant('pw ping success')
-                                break
-                            else:
-                                raise Exception('pw ping fail')
+                    # Check network connection
+                    await ping_begin()
 
-                        except Exception as errex:
-                            prant('__error ping:', errex)
-                            ping_tally += 1
-
-                        finally:
-                            try:
-                                await context.close()
-                            except Exception as errex:
-                                prant('ping: could not close context', errex)
-
-
-                        # Bash ping attempt
-                        bash_ping_ret = bash_ping_f()
-
-                        # Restart network interface on any two errors
-                        if ping_tally > 1 or bash_ping_ret != 0:
-                            pw_pause = True
-                            await restart_nic_f()
-                    
 
             except Exception as errex:
                 prant('\n\n\nprog_f __ERROR:', errex, sys.exc_info()[2].tb_lineno)
                 await asyncio.sleep(2)
 
 
-        # All done. Close browsers
+        # Scrape complete. Close browsers
         for i in brow_l:
             await i.close()
+
+        try: session.close()
+        except Exception as errex: print('__err nah already', errex)
 
 
 
@@ -1187,6 +1198,40 @@ all_done_d = {}  # Each task states if the queue is empty
 
 
 
+# robots.txt and domain tracker used for rate limiting
+domain_lock = asyncio.Lock()
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
+
+class domain_c:
+    domain_d = {}  # Used to store one robots.txt file per domain. [domain_dup]: obj
+    @timeout_decorator.timeout(8)
+    def __init__(self, domain, dup_domain):
+        self.last_req_ts = 0.0
+        self.domain_count = 0
+
+        # Get robots.txt
+        try:
+            prant('new domain:', domain, dup_domain)  ##
+            self.rp = urllib.robotparser.RobotFileParser()
+            self.rp.set_url(parse.urljoin(domain, "robots.txt"))
+            self.rp.read()  # req
+            prant(self.rp.url, 'rp read:', self.rp.can_fetch('*', '*'), self.rp.allow_all, self.rp.disallow_all)
+        except Exception as errex:
+            prant('__error: rp read:', domain, errex)
+            self.rp = None
+
+        # Store rp so it is requested only once
+        domain_c.domain_d[dup_domain] = self
+
+
+    # After req
+    def update(self):
+        #with domain_lock:
+        self.last_req_ts = datetime.now().timestamp()
+        self.domain_count += 1
+
+
 
 
 
@@ -1222,6 +1267,16 @@ except Exception as errex:
 
     checked_urls_d = {} # URLs that have been checked and their outcome (jbw conf, redirect, or error)
     error_urls_d = {} # URLs that have resulted in an error
+
+    # Read rp file
+    try:
+        with open('/home/joepers/code/jj_v' + version + '/rp_file', 'r') as rp_file:
+            rp_date = date.fromisoformat(rp_file.readline()[:-1])
+
+        if date.today().isoformat() - rp_date > 60:
+            print('__error: rp_file outdated')
+    except Exception as errex:
+        print('yeah didnt work', errex)
 
     # Read DBs
     with open('/home/joepers/code/jj_v' + version + '/dbs/civ_db', 'r') as f:
@@ -1260,66 +1315,39 @@ except Exception as errex:
             try:
                 multi_org_d[db_name][url_dup].append(org_name)  # Not first org using this URL
                 print('Putting in multi org dict:', em_url)
-            except:
+            except KeyError:
                 multi_org_d[db_name][url_dup] = [org_name]  # First org using this URL
-                s_checked_entry_f(url_dup, None)
+                #s_checked_entry_f(url_dup, None)
 
                 # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
                 working_o = working_c(org_name, em_url, 0, homepage, db_name, url_dup, 0)
+                proceed_f(em_url)  # respect robots.txt
                 all_urls_q.put_nowait(working_o)
 
         db = None  # Clear
         working_c.total_count = all_urls_q.qsize()
 
+try:
+    ttt_d = {}
+
+    for k,v in domain_c.domain_d.items():
+        ttt_d[k] = v.rp.__str__()
+
+    print(ttt_d)
+
+    rp_path2 = '/home/joepers/code/jj_v' + version + '/rp_file2'
+
+    with open(rp_path2, 'w', encoding='utf8') as rp_file2:
+        pickle.dump(ttt_d, rp_file2)
+except Exception as errex:
+    print('tried', errex)
+
+rp_path = '/home/joepers/code/jj_v' + version + '/rp_file'
+
+with open(rp_path, 'w', encoding='utf8') as rp_file:
+    pickle.dump(domain_c.domain_d, rp_file)
 
 
-
-# robots.txt and domain tracker used for rate limiting
-domain_lock = asyncio.Lock()
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
-class domain_c:
-    domain_d = {}  # Used to store one robots.txt file per domin. [domain_dup]: obj
-    def __init__(self, rp, dup_domain):
-        self.rp = rp
-        self.last_req_ts = 0.0
-        self.domain_count = 0
-        self.domain_d[dup_domain] = self  # dict of all objs
-
-    # After req
-    def update(domain, dup_domain):
-        try:
-            #with domain_lock:
-            domain_c.domain_d[dup_domain].last_req_ts = datetime.now().timestamp()
-            domain_c.domain_d[dup_domain].domain_count += 1
-        except KeyError:  # This will be called on initial URLs because proceed_f is skipped
-            prant('calling get_rp:', domain, dup_domain)
-            domain_c.get_rp(domain, dup_domain)
-
-    # Before req
-    @timeout_decorator.timeout(8)
-    def get_rp(domain, dup_domain):
-
-        # Robot parser exists
-        if dup_domain in domain_c.domain_d:
-            return domain_c.domain_d[dup_domain]
-
-        # Get robot parser
-        else:
-            try:
-                prant('\nnew domain:', domain, dup_domain)
-                rp = urllib.robotparser.RobotFileParser()
-                rp.set_url(parse.urljoin(domain, "robots.txt"))
-                rp.read()  # req
-                prant(rp.url, 'rp read:', rp.can_fetch('*', '*'), rp.allow_all, rp.disallow_all)
-                domain_c(rp, dup_domain)  # new obj with rp
-                return domain_c.domain_d[dup_domain]
-            except Exception as errex:
-                prant('__error: rp read:', domain, errex)
-                domain_c(None, dup_domain)  # new obj without rp
-                return domain_c.domain_d[dup_domain]
-
-            
 
 
 
@@ -1354,25 +1382,21 @@ for i in jobwords_su_high:
 
 
 
-# Convert CML to nice format that can be read by humans and json
+# Convert CML and errorlog to nice format that can be read by humans and json
 ## this prevents resumption because json converts None to null: NameError: name 'null' is not defined
 cml_text = '{\n'
 for k, v in checked_urls_d.items(): cml_text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n' # json uses double quotes
 cml_text = cml_text[:-3] # Delete trailing newlines and comma
 cml_text += '\n}'
-
-# Write CML
 with open(checked_path, 'w', encoding='utf8') as checked_file:
     checked_file.write(cml_text)
 
-
-
+# Write errorlog
 # url: [[org name, db type, crawl level], [[error number, error desc], [error number, error desc]], [final error flag, fallback flags]]
 e_text = '{\n'
 for k, v in error_urls_d.items(): e_text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n'
 e_text = e_text[:-3]
 e_text += '\n}'
-
 with open(error_path, 'w', encoding='utf8') as error_file:
     error_file.write(e_text)
 

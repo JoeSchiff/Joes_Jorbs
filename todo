@@ -5,30 +5,38 @@ pickle.dump() start giving "maximum recursion depth exceeded while calling a Pyt
 
 
 Todo:
-replace with with async with when necessary
-static resp.close and session.close()
-separate funcions
-  jbw count and write file
+replace with with async with when necessary + might fix pickle recursion error -
+static resp.close and session.close() - already closed with context managers
+
+separate functions
+  jbw count and write file +
   robots and proceed
   looper
   pw reqer
     combine success and fail conditions for pw and static?
+  pagination
+  check net
   post scrape
+
 logging module
   always print task id
   must include stderr
   determine log levels:
     __err: error
+
 handle timeouts uniformly +
   check async timeout again
   child frames
+
 iso date format +
+
 respect robots.txt
+  store rp files or make async
   check robots.txt once per domain +
   before each req: check rp. if doesnt exist create domain key +
   after success req: update timestamp and domain count +
     after any req? not just success?
-  call proceed_f on initial urls?
+  call proceed_f on initial urls +
   default useragent
   use 2 useragents to see difference?
   pass rp into working_o?
@@ -38,7 +46,8 @@ respect robots.txt
         save and recover
         global default rate limiter also
     why class? use attributes not dict +
-    use self in methods
+    use self in methods +
+
 auto blacklist +
     blacklist is dup urls +
     must be exact match, not domain. ex: 5il.co != 5il.co/page3
