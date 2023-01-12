@@ -237,7 +237,7 @@ class working_c:
 
 
     # Save webpage vis text to file
-    async def write_results(self):
+    def write_results(self):
 
         jbw_count = self.count_jbws_f()
 
@@ -268,7 +268,7 @@ class working_c:
         file_contents_s = str(jbw_count) + '\x1f' + self.browser + '\x1f' + self.vis_text
 
         # Write HTML to text file using url name (max length is 255)
-        async with open(html_path[:254], "w", encoding='ascii', errors='ignore') as write_html:
+        with open(html_path[:254], "w", encoding='ascii', errors='ignore') as write_html:
             write_html.write(file_contents_s)
         prant('Success: Write:', url_path)
 
@@ -362,7 +362,6 @@ def proceed_f(url):
 
     # Can fetch
     if domain_o.rp and len(domain_o.rp.__str__()) > 1:
-        print(66666666, domain_o.rp.url, domain_o.rp)
         if not domain_o.rp.can_fetch('*', url):
             prant('can not fetch:', url)
             return False
@@ -463,7 +462,7 @@ async def looper_f(pw, session):
             prant('begin check_vis_text', working_o, task_id)
             if not working_o.check_vis_text():  # Check for minimum content/soft 404
                 continue
-            await working_o.write_results()  # Write result text to file
+            working_o.write_results()  # Write result text to file
             crawler_f(working_o)  # Get more links from page
 
         #elif hassattr(working_o, erorr): handle errors here?
@@ -1119,7 +1118,7 @@ async def main():
         for i in brow_l:
             await i.close()
 
-        try: session.close()
+        try: await session.close()
         except Exception as errex: print('__err nah already', errex)
 
 
@@ -1204,7 +1203,8 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
 
 class domain_c:
-    domain_d = {}  # Used to store one robots.txt file per domain. [domain_dup]: obj
+    domain_d = {}    
+
     @timeout_decorator.timeout(8)
     def __init__(self, domain, dup_domain):
         self.last_req_ts = 0.0
@@ -1265,18 +1265,29 @@ try:
 except Exception as errex:
     print(errex, '\nUsing an original queue')
 
-    checked_urls_d = {} # URLs that have been checked and their outcome (jbw conf, redirect, or error)
-    error_urls_d = {} # URLs that have resulted in an error
+    checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
+    error_urls_d = {}  # URLs that have resulted in an error
+
 
     # Read rp file
     try:
-        with open('/home/joepers/code/jj_v' + version + '/rp_file', 'r') as rp_file:
-            rp_date = date.fromisoformat(rp_file.readline()[:-1])
+        with open('/home/joepers/code/jj_v' + version + '/rp_file', 'rb') as rp_file:
+            rp_d = pickle.load(rp_file)
 
-        if date.today().isoformat() - rp_date > 60:
-            print('__error: rp_file outdated')
+        # Get time robots.txt was fetched
+        for i in rp_d.values():
+            ts = i.rp.mtime()
+            if ts: break
+
+        print('rp_file recovery complete')
+        if datetime.now() - datetime.fromtimestamp(ts) > timedelta(days=60):
+            print('rp_file outdated:', datetime.fromtimestamp(ts).isoformat())
+        else:
+            domain_c.domain_d = rp_d
+            print('rp_file still valid:', datetime.fromtimestamp(ts).isoformat())
     except Exception as errex:
-        print('yeah didnt work', errex)
+        print('RP file read failed:', errex)
+
 
     # Read DBs
     with open('/home/joepers/code/jj_v' + version + '/dbs/civ_db', 'r') as f:
@@ -1290,9 +1301,9 @@ except Exception as errex:
     # Testing purposes
     '''
     civ_db = [
-    #["City of Albany", "https://jobs.albanyny.gov/jobopps", "http://www.albanyny.org"],
-    #["City of Amsterdam", "https://www.amsterdamny.gov/Jobs.aspx", "http://www.amsterdamny.gov/"],
-    #["City of fake", "https://jobs.albadfdggdgnyny.gov/jobopps", "http://www.albanyny.org"]
+    ["City of Albany", "https://jobs.albanyny.gov/jobopps", "http://www.albanyny.org"],
+    ["City of Amsterdam", "https://www.amsterdamny.gov/Jobs.aspx", "http://www.amsterdamny.gov/"],
+    ["City of fake", "https://jobs.albadfdggdgnyny.gov/jobopps", "http://www.albanyny.org"],
     ["Village of Fort Plain", "https://www.fortplain.org/contact-us/employment/", "https://www.fortplain.org/contact-us/employment/"]
     ]
     sch_db = []
@@ -1327,24 +1338,11 @@ except Exception as errex:
         db = None  # Clear
         working_c.total_count = all_urls_q.qsize()
 
-try:
-    ttt_d = {}
 
-    for k,v in domain_c.domain_d.items():
-        ttt_d[k] = v.rp.__str__()
 
-    print(ttt_d)
-
-    rp_path2 = '/home/joepers/code/jj_v' + version + '/rp_file2'
-
-    with open(rp_path2, 'w', encoding='utf8') as rp_file2:
-        pickle.dump(ttt_d, rp_file2)
-except Exception as errex:
-    print('tried', errex)
-
+# Write RP to file
 rp_path = '/home/joepers/code/jj_v' + version + '/rp_file'
-
-with open(rp_path, 'w', encoding='utf8') as rp_file:
+with open(rp_path, 'wb',) as rp_file:
     pickle.dump(domain_c.domain_d, rp_file)
 
 
