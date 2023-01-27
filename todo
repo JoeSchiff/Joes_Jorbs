@@ -17,14 +17,14 @@ separate functions
   robots and proceed
   looper
   pw reqer
-    combine success and fail conditions for pw and static?
-  pagination
+    combine success and fail conditions for pw and static
+  pagination +
   check net +
   post scrape
 
 logging module
   always print task id + when available
-  must include stderr
+  must include stderr +
   determine log levels +
 
 handle timeouts uniformly +
