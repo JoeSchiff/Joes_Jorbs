@@ -8,6 +8,10 @@ Todo:
 replace with with async with when necessary + might fix pickle recursion error -
 static resp.close and session.close() - already closed with context managers
 
+refactor
+  any func with instance as arg should be method?
+  clean return unn?
+  
 separate functions
   jbw count and write file +
   robots and proceed
