@@ -82,6 +82,7 @@ sys.excepthook = uncaught_handler
 class working_c:
     prog_count = 0
     total_count = 0
+    
     def __init__(self, org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num):
         self.org_name = org_name
         self.workingurl = workingurl
@@ -92,6 +93,13 @@ class working_c:
         self.req_attempt_num = req_attempt_num
         self.domain = '://'.join(parse.urlparse(workingurl)[:2])  # Includes scheme and www. Used for building abspaths from rel links
         self.dup_domain = workingurl_dup.split('/')[0]  # Used for domain limiter
+        # Select jbw list. Used for weighing confidence and finding links
+        if self.jbw_type == 'civ':
+            self.jbws_high_conf = jbws_civ_high
+            self.jbws_low_conf = jbws_civ_low
+        else:
+            self.jbws_high_conf = jbws_su_high
+            self.jbws_low_conf = jbws_su_low
 
     # After successful request
     def add_html(self, html, vis_text, red_url, browser):
@@ -196,19 +204,11 @@ class working_c:
     # Determine confidence that a page has job postings
     def count_jbws_f(self):
 
-        # Select jbw lists
-        if self.jbw_type == 'civ':
-            jobwords_high_conf = jobwords_civ_high
-            jobwords_low_conf = jobwords_civ_low
-        else:
-            jobwords_high_conf = jobwords_su_high
-            jobwords_low_conf = jobwords_su_low
-
         # Count jobwords on the page
         jbw_count = 0
-        for i in jobwords_low_conf:
+        for i in self.jbws_low_conf:
             if i in self.vis_text: jbw_count += 1
-        for i in jobwords_high_conf:
+        for i in self.jbws_high_conf:
             if i in self.vis_text: jbw_count += 2
 
         return jbw_count
@@ -267,7 +267,7 @@ def s_dup_checker_f(url):
     return url_dup.lower()
 
 
-# Only entrypoint into CML
+# Entrypoint into CML
 def s_checked_entry_f(url_dup, *args):
     #with check_lock:
     checked_urls_d[url_dup] = args
@@ -329,6 +329,27 @@ def proceed_f(url) -> bool:
     return True
 
 
+# Get working list from queue
+def get_working_o_f():
+    try:
+        async with q_lock:
+            working_o = all_urls_q.get_nowait()
+            all_done_d[task_id] = False
+        return working_o
+
+    # Empty queue
+    except asyncio.QueueEmpty:
+        logger.info(f'queue empty {task_id}')
+        all_done_d[task_id] = True
+        await asyncio.sleep(8)
+        return
+
+    except Exception:
+        logger.exception(f'QUEUE __ERROR:')
+        await asyncio.sleep(8)
+        return
+
+        
 
 # Decide which requester to use based on number of attmepts for that URL
 async def looper_f(pw, session):
@@ -337,24 +358,15 @@ async def looper_f(pw, session):
     # End looper if all tasks report empty queue
     while not all(all_done_d.values()):
 
+        # Check internet connectivity
+        while pw_pause:
+            logger.warning(f'pw_pause invoked {task_id}')
+            await asyncio.sleep(4)
+
         # Get working list from queue
-        try:
-            async with q_lock:
-                working_o = all_urls_q.get_nowait()
-                all_done_d[task_id] = False
-
-        # Empty queue
-        except asyncio.QueueEmpty:
-            logger.info(f'queue empty {task_id}')
-            all_done_d[task_id] = True
-            await asyncio.sleep(8)
-            continue
-
-        except Exception:
-            logger.exception(f'QUEUE __ERROR:')
-            await asyncio.sleep(8)
-            continue
-
+        working_o = get_working_o_f()
+        if not working_o: continue
+        
         # Choose requester based on attempt number
         try:
             working_o.req_attempt_num += 1  # Increment attempt num
@@ -403,35 +415,33 @@ async def looper_f(pw, session):
     logger.info(f'Task complete: {task_id}')
 
 
+# Select pw browser, create context and page
+def get_pw_brow(pw, task_id):
+    for brow in brow_l:
+        try:
+            context = await brow.new_context(ignore_https_errors=True)
+            context.set_default_timeout(20000)
+            page = await context.new_page()
+            logger.debug(f'using brow: {brow._impl_obj._browser_type.name} {task_id}')
+            return context, page
+
+        # Remove browser from available list on error
+        except Exception:
+            logger.exception(f'error creating context or page {task_id}')
+            await clear_brows_f(pw, brow)
+
+    # No browser available
+    else:
+        logger.warning(f'brow list empty {task_id}')
+        await asyncio.sleep(4)
+
+
 # Playwright requester
 @timeout_decorator.timeout(20)
 async def pw_req_f(working_o, task_id, pw):
+    
     # Select pw browser, context, and page
-    stay = True
-    while stay:
-        for brow in brow_l:
-            try:
-                context = await brow.new_context(ignore_https_errors=True)
-                context.set_default_timeout(20000)
-                page = await context.new_page()
-                stay = False
-                logger.debug(f'using brow: {brow._impl_obj._browser_type.name} {task_id}')
-                break
-
-            # Remove browser from available list on error
-            except Exception:
-                logger.exception(f'__erroring {task_id}')
-                await clear_brows_f(pw, brow)
-
-        # No browser available
-        else:
-            logger.warning(f'brow list empty {task_id}')
-            await asyncio.sleep(4)
-
-    # Check internet connectivity
-    while pw_pause:
-        logger.warning(f'pw_pause invoked {task_id}')
-        await asyncio.sleep(4)
+    context, page = get_pw_brow(pw, task_id)
 
     # Request URL
     try:
@@ -677,6 +687,87 @@ def vis_soup_f(html):
 
 
 
+# Include pagination links
+def get_pagination_f(working_o):
+        org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
+        domain = working_o.domain
+        soup = working_o.soup
+        
+    for pag_class in soup.find_all(class_='pagination'):
+        logger.info(f'pagination class found: {workingurl}')
+        for anchor_tag in pag_class.find_all('a'):  # Find anchor tags
+            if anchor_tag.text.lower() == 'next':  # Find "next" page url
+
+                # Add to queue
+                abspath = parse.urljoin(domain, anchor_tag.get('href'))
+                if proceed_f(abspath):
+                    logger.info(f'Adding pagination url: {abspath} {workingurl}')
+                    working_o.workingurl = abspath
+                    working_o.workingurl_dup = url_dup
+                    working_o.parent_url = workingurl
+                    working_o.add_to_queue()
+
+            ## look for next page button represented by angle bracket
+            elif '>' in anchor_tag.text: logger.debug(f'pagination angle bracket {anchor_tag.text}')
+
+
+# Find more links
+def get_links_f(soup, jbws_high_conf):
+        
+    fin_urls = set()
+    for anchor_tag in soup.find_all('a'):
+        bs_url = anchor_tag.get('href')
+
+        # Replace newlines with a space. should this be after parent select?
+        for br in anchor_tag.find_all("br"):
+            br.replace_with(" ")
+
+        # Widen search of jbws if only 1 url in elem. should this be recursive? ie grandparent
+        if len(anchor_tag.parent.find_all('a')) == 1:
+            tag = anchor_tag.parent
+        else:
+            tag = anchor_tag
+
+        # Skip if no jobwords in tag
+        ## use this for only high conf jbws
+        tag_content = str(tag.text).lower()
+        if not any(jbw in tag_content for jbw in jbws_high_conf):
+            logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
+            continue
+
+        '''
+        ## use this for either low or high conf jbws, with new low conf format
+        if not any(ttt in tag_content for ttt in jbws_high_conf + jbws_low_conf):
+            if working_o.jbw_type == 'civ': continue
+            # Exact match only for sch and uni extra low conf jbws
+            else:
+                if not tag_content in jbws_su_x_low: continue
+        '''
+
+
+        # Skip if the tag contains a bunkword
+        if any(bunkword in tag_content for bunkword in bunkwords):
+            logger.debug(f'Bunk word detected: {workingurl} {tag_content[:99]}')
+            continue
+
+
+        '''
+        # Tally which jbws are used
+        for i in jbws_high_conf + jbws_low_conf:
+            if i in tag_content:
+                async with lock: jbw_tally_ml.append(i)
+        '''
+
+
+        abspath = parse.urljoin(domain, bs_url).strip()  # Convert relative paths to absolute and strip whitespace
+
+        # Remove non printed characters
+        #abspath = abspath.encode('ascii', 'ignore').decode()
+        #abspath = parse.quote(abspath)
+
+        fin_urls.add(abspath)
+
+    return fin_urls
 
 
 # Explore html to find more links and weigh confidence
@@ -685,30 +776,15 @@ def crawler_f(working_o):
         org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
         domain = working_o.domain
         soup = working_o.soup
+        jbws_high_conf = working_o.jbws_high_conf
 
         # Remove non ascii characters, strip, percent encode
         #red_url = red_url.encode('ascii', 'ignore').decode().strip()
         #red_url = parse.quote(red_url, safe='/:')
 
-        # Search for pagination class before checking crawl level
-        for i in soup.find_all(class_='pagination'):
-            logger.info(f'pagination class found: {workingurl}')
-            for ii in i.find_all('a'):  # Find anchor tags
-                if ii.text.lower() == 'next':  # Find "next" page url
 
-                    abspath = parse.urljoin(domain, ii.get('href'))
-
-                    # Add to queue
-                    if proceed_f(abspath):
-                        logger.info(f'Adding pagination url: {abspath} {workingurl}')
-                        working_o.workingurl = abspath
-                        working_o.workingurl_dup = url_dup
-                        working_o.parent_url = workingurl
-                        working_o.add_to_queue()
-
-                ## look for next page button represented by angle bracket
-                if '>' in ii.text: logger.debug(f'pagination angle bracket {ii.text}')
-
+        # Search for pagination links before checking crawl level
+        get_pagination_f(working_o)
 
         # Limit crawl level
         if current_crawl_level > max_crawl_depth:
@@ -717,75 +793,13 @@ def crawler_f(working_o):
         logger.debug(f'Begin crawling: {workingurl}')
         working_o.current_crawl_level += 1
 
-        # Select job word list
-        if working_o.jbw_type == 'civ':
-            jobwords_high_conf = jobwords_civ_high
-        else:
-            jobwords_high_conf = jobwords_su_high
 
-        # Separate soup into anchor tags
-        fin_urls_l = []  # List of urls to add to queue
-        for anchor_tag in soup.find_all('a'):
-
-            # Replace newlines with a space. should this be after parent select?
-            for br in anchor_tag.find_all("br"):
-                br.replace_with(" ")
-
-            # Build list of anchors and parent elements of single anchors. should this be recursive? ie grandparent
-            if len(anchor_tag.parent.find_all('a')) == 1:
-                tag = anchor_tag.parent
-            else:
-                tag = anchor_tag
-
-            tag_content = str(tag.text).lower()
-
-
-            # Skip if no jobwords in tag
-            ## use this for only high conf jbws
-            if not any(jbw in tag_content for jbw in jobwords_high_conf): continue
-
-            '''
-            ## use this for either low or high conf jbws, with new low conf format
-            if not any(ttt in tag_content for ttt in jobwords_high_conf + jobwords_low_conf):
-                if working_o.jbw_type == 'civ': continue
-                # Exact match only for sch and uni extra low conf jbws
-                else:
-                    if not tag_content in jobwords_su_x_low: continue
-            '''
-
-
-            # Use lower tag for bunkwords search only. URL and text
-            lower_tag = str(tag).lower()
-
-            # Exclude if the tag contains a bunkword
-            if any(yyy in lower_tag for yyy in bunkwords):
-                logger.debug(f'Bunk word detected: {workingurl} {lower_tag[:99]}')
-                continue
-
-
-            '''
-            # Jbw tally
-            for i in jobwords_high_conf + jobwords_low_conf:
-                if i in lower_tag:
-                    async with lock: jbw_tally_ml.append(i)
-            '''
-
-
-            if tag.name == 'a': bs_url = tag.get('href') # Get url from anchor tag
-            else: bs_url = tag.find('a').get('href') # Get url from first child anchor tag
-
-            abspath = parse.urljoin(domain, bs_url).strip() # Convert relative paths to absolute and strip whitespace
-
-            # Remove non printed characters, strip, and replace spaces
-            #abspath = abspath.encode('ascii', 'ignore').decode().strip()
-            #abspath = parse.quote(abspath)
-
-            if abspath not in fin_urls_l:
-                fin_urls_l.append(abspath)
+        # List of urls to add to queue
+        fin_urls = get_links_f(soup, jbws_high_conf)
 
         # Check new URLs and append to queue
-        logger.debug(f'links from {workingurl} {fin_urls_l}')
-        for abspath in fin_urls_l:
+        logger.debug(f'links from {workingurl} {fin_urls}')
+        for abspath in fin_urls:
 
             # Add new link to queue
             if proceed_f(abspath):
@@ -794,12 +808,10 @@ def crawler_f(working_o):
                 working_o.parent_url = workingurl
                 working_o.add_to_queue()
 
-
     except Exception as errex:
         logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {str(traceback.format_exc())} {working_o}')
         add_errorurls_f(working_o, 'jj_error 1', str(errex), True)
         return
-
 
 
 
@@ -861,7 +873,7 @@ async def clear_brows_f(pw, *args):
     res_brow_set.clear()
 
 
-# Check internet connectivity using PW on joesjorbs.com
+# Check internet connectivity using pw on joesjorbs.com
 async def ping_begin():
     ping_tally = 0
     while True:
@@ -1068,13 +1080,6 @@ async def main():
 
 
 
-
-
-
-
-
-
-
 # Dir for error 7 files
 err7_path = os.path.join(dater_path, 'jj_error_7')
 if not os.path.exists(err7_path):
@@ -1125,18 +1130,18 @@ bunkwords = ('academics', '5il.co', '5il%2eco', 'pnwboces.org', 'recruitfront.co
 
 # Include links that include any of these
 # Set high and low confidence jbw lists
-jobwords_all_high = ('continuous recruitment', 'employment', 'job listing', 'job opening', 'job posting', 'job announcement', 'job opportunities', 'job vacancies', 'jobs available', 'available positions', 'open positions', 'available employment', 'career opportunities', 'employment opportunities', 'current vacancies', 'current job', 'current employment', 'current opening', 'current posting', 'current opportunities', 'careers at', 'jobs at', 'jobs @', 'work at', 'employment at', 'find your career', 'browse jobs', 'search jobs', 'vacancy postings', 'vacancy list', 'prospective employees', 'help wanted', 'work with', 'immediate opportunities', 'promotional announcements')
-jobwords_all_low = ('join', 'job', 'job seeker', 'job title', 'positions', 'careers', 'human resource', 'personnel', 'vacancies', 'vacancy', 'posting', 'opening', 'recruitment')
+jbws_all_high = ('continuous recruitment', 'employment', 'job listing', 'job opening', 'job posting', 'job announcement', 'job opportunities', 'job vacancies', 'jobs available', 'available positions', 'open positions', 'available employment', 'career opportunities', 'employment opportunities', 'current vacancies', 'current job', 'current employment', 'current opening', 'current posting', 'current opportunities', 'careers at', 'jobs at', 'jobs @', 'work at', 'employment at', 'find your career', 'browse jobs', 'search jobs', 'vacancy postings', 'vacancy list', 'prospective employees', 'help wanted', 'work with', 'immediate opportunities', 'promotional announcements')
+jbws_all_low = ('join', 'job', 'job seeker', 'job title', 'positions', 'careers', 'human resource', 'personnel', 'vacancies', 'vacancy', 'posting', 'opening', 'recruitment')
 
-jobwords_civ_high = ['upcoming exam', 'exam announcement', 'examination announcement', 'examinations list', 'civil service opportunities', 'civil service exam', 'civil service test', 'current civil service', 'open competitive', 'open-competitive']
-jobwords_civ_high += jobwords_all_high
+jbws_civ_high = ['upcoming exam', 'exam announcement', 'examination announcement', 'examinations list', 'civil service opportunities', 'civil service exam', 'civil service test', 'current civil service', 'open competitive', 'open-competitive']
+jbws_civ_high += jbws_all_high
 
-jobwords_civ_low = ['open to', 'civil service', 'exam', 'examination', 'test', 'current exam']
-jobwords_civ_low += jobwords_all_low
+jbws_civ_low = ['open to', 'civil service', 'exam', 'examination', 'test', 'current exam']
+jbws_civ_low += jbws_all_low
 
-jobwords_su_high = jobwords_all_high
-jobwords_su_low = jobwords_all_low
-jobwords_su_x_low = ('faculty', 'staff', 'adjunct', 'academic', 'support', 'instructional', 'administrative', 'professional', 'classified', 'coaching')
+jbws_su_high = jbws_all_high
+jbws_su_low = jbws_all_low
+jbws_su_x_low = ('faculty', 'staff', 'adjunct', 'academic', 'support', 'instructional', 'administrative', 'professional', 'classified', 'coaching')
 
 
 
@@ -1347,19 +1352,19 @@ asyncio.run(main(), debug=True)
 
 '''
 # jbw tally
-for i in jobwords_civ_low:
+for i in jbws_civ_low:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
 
-for i in jobwords_su_low:
+for i in jbws_su_low:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
 
-for i in jobwords_civ_high:
+for i in jbws_civ_high:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
 
-for i in jobwords_su_high:
+for i in jbws_su_high:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
 '''
