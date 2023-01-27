@@ -351,7 +351,7 @@ async def looper_f(pw, session):
             continue
 
         except Exception:
-            logger.exception(f'\n\n QUEUE __ERROR:')
+            logger.exception(f'QUEUE __ERROR:')
             await asyncio.sleep(8)
             continue
 
@@ -696,7 +696,7 @@ def crawler_f(working_o):
             for ii in i.find_all('a'):  # Find anchor tags
                 if ii.text.lower() == 'next':  # Find "next" page url
 
-                    abspath = parse.urljoin(domain, ii.get('href')) # Get absolute url
+                    abspath = parse.urljoin(domain, ii.get('href'))
 
                     # Add to queue
                     if proceed_f(abspath):
@@ -972,7 +972,7 @@ async def save_objs_f():
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
     except Exception:
-        logger.exception(f'\n\n\n prog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
+        logger.exception(f'\n prog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
     logger.debug(f'prog save success')
 
 
@@ -982,7 +982,7 @@ async def save_objs_f():
 
 
 async def main():
-    logger.info(f'\n\n Program Start')
+    logger.info(f'\n Program Start')
 
     # Start Playwright and aiohttp
     timeout = aiohttp.ClientTimeout(total=8)
@@ -1040,7 +1040,7 @@ async def main():
 
 
             except Exception:
-                logger.exception(f'\n\n\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
+                logger.exception(f'\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
                 await asyncio.sleep(2)
 
 
@@ -1053,7 +1053,7 @@ async def main():
 
 
 
-        logger.info(f'\n\n\n\n =============================  Scrape complete  =============================')
+        logger.info(f'  Scrape complete  '.center(70, '='))
 
 
 
@@ -1204,7 +1204,7 @@ try:
 
         # Remove expired entries
         else:
-            logger.info(f'\n Removing expired auto blacklist entry: {k} {v}')
+            logger.info(f'Removing expired auto blacklist entry: {k} {v}')
             rem_l.append(k)
 
     for i in rem_l:
@@ -1440,7 +1440,7 @@ for db_type, url_d in multi_org_d.items():
             # this acts like a portal error for all other orgs in this list too. can also find these errors by finding multi_d orgs in the errorlog
             # Detect no results for first multi_d org
             else:
-                logger.info(f'\nmulti_org portal errors: {org_names_l}')
+                logger.info(f'multi_org portal errors: {org_names_l}')
 logger.info(f'\nMulti orgs: {org_count}')
 logger.info(f'Multi org files: {file_count}')
 
