@@ -40,7 +40,7 @@ if not os.path.exists(dater_path):
     os.makedirs(dater_path)
 
 # Dir for rp and autoblacklist files
-persistent_path = os.path.join(jorb_home, 'persistent')
+persistent_path = os.path.join(jorb_home, '.persistent')
 if not os.path.exists(persistent_path):
     os.makedirs(persistent_path)
 
@@ -49,7 +49,7 @@ if not os.path.exists(persistent_path):
 class context_filter(logging.Filter):
     def filter(self, record):
         try:
-            record.task_id = asyncio.current_task().get_name()
+            record.task_id = '- ' + asyncio.current_task().get_name()
         except:
             record.task_id = ''
         return True
@@ -61,7 +61,7 @@ logger.setLevel(logging.DEBUG)
 log_path = os.path.join(dater_path, 'log_file')
 f_handler = logging.FileHandler(log_path, mode='a')
 f_handler.setLevel(logging.DEBUG)
-f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s - %(task_id)s', datefmt='%H:%M:%S')
+f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s %(task_id)s', datefmt='%H:%M:%S')
 f_handler.setFormatter(f_format)
 f_handler.addFilter(context_filter())
 
@@ -232,12 +232,12 @@ class working_c:
             return
 
         # Make jbw type dirs inside date dir
-        dated_results_path = os.path.join(dater_path, 'results', self.jbw_type)
-        if not os.path.exists(dated_results_path):
-            os.makedirs(dated_results_path)
+        results_db_path = os.path.join(results_path, self.jbw_type)
+        if not os.path.exists(results_db_path):
+            os.makedirs(results_db_path)
 
         # Make directory using org name
-        org_path = os.path.join(dated_results_path, self.org_name)
+        org_path = os.path.join(results_db_path, self.org_name)
         if not os.path.exists(org_path):
             os.makedirs(org_path)
 
@@ -424,6 +424,7 @@ async def get_pw_brow(pw, task_id):
     for brow in brow_l:
         try:
             context = await brow.new_context(ignore_https_errors=True)
+            logger.debug(f'here3')
             context.set_default_timeout(20000)
             page = await context.new_page()
             logger.debug(f'using brow: {brow._impl_obj._browser_type.name}')
@@ -446,7 +447,6 @@ async def pw_req_f(working_o, task_id, pw):
     logger.debug(f'here1')
     # Select pw browser, context, and page
     context, page = await get_pw_brow(pw, task_id)
-    logger.debug(f'here2')
     # Request URL
     try:
         workingurl = working_o.workingurl
@@ -700,7 +700,8 @@ def get_pagination_f(working_o):
     for pag_class in soup.find_all(class_='pagination'):
         logger.info(f'pagination class found: {workingurl}')
         for anchor_tag in pag_class.find_all('a'):  # Find anchor tags
-            if anchor_tag.text.lower() == 'next':  # Find "next" page url
+            logger.info(f'anchor_tag.text {anchor_tag.text}')
+            if 'next' in anchor_tag.text.lower():  # Find "next" page url
 
                 # Add to queue
                 abspath = parse.urljoin(domain, anchor_tag.get('href'))
@@ -740,7 +741,7 @@ def get_links_f(soup, jbws_high_conf, workingurl, domain):
         ## use this for only high conf jbws
         tag_content = str(tag.text).lower()
         if not any(jbw in tag_content for jbw in jbws_high_conf):
-            logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
+            #logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
             continue
 
         '''
@@ -989,7 +990,17 @@ async def save_objs_f():
     logger.debug(f'prog save success')
 
 
-
+# Display progress
+def display_prog():
+    logger.info(f'\nProgress: {working_c.prog_count} of {working_c.total_count}')
+    logger.info(f'mem use: {psutil.virtual_memory()[2]}')
+    for t_brow in brow_l:
+        for t_con in t_brow.contexts:
+            logger.info(f'{t_brow._impl_obj._browser_type.name} open pages: {len(t_con.pages)} {t_con.pages}')
+    logger.info(f'running tasks: {len(asyncio.all_tasks())}')
+    #prant('running tasks:', asyncio.all_tasks())
+    logger.info(f'len(brow_l): {len(brow_l)}')
+    logger.info(f'len(res_brow_set): {len(res_brow_set)}')
 
 
 
@@ -1013,34 +1024,20 @@ async def main():
             all_done_d[task.get_name()] = False
 
 
-
         # Wait for scraping to finish
         skip_tally = 0
         while not all(all_done_d.values()):
-
             try:
-
-                # Display progress
-                logger.info(f'\nProgress: {working_c.prog_count} of {working_c.total_count}')
-                logger.info(f'mem use: {psutil.virtual_memory()[2]}')
-                for t_brow in brow_l:
-                    for t_con in t_brow.contexts:
-                        logger.info(f'{t_brow._impl_obj._browser_type.name} open pages: {len(t_con.pages)} {t_con.pages}')
-                logger.info(f'running tasks: {len(asyncio.all_tasks())}')
-                #prant('running tasks:', asyncio.all_tasks())
-                logger.info(f'len(brow_l): {len(brow_l)}')
-                logger.info(f'len(res_brow_set): {len(res_brow_set)}')
-
+                display_prog()
                 await asyncio.sleep(8)
-                skip_tally += 1
-
 
                 # Intermittent
+                skip_tally += 1
                 if skip_tally >= 2:
                     skip_tally = 0
 
-                    # Save progress
-                    await save_objs_f()
+                    await save_objs_f()  # Save progress
+                    await ping_begin()  # Check network connection
 
                     # Restart primary browser when mem usage is high
                     if psutil.virtual_memory()[2] > 50:
@@ -1048,25 +1045,21 @@ async def main():
                         logger.warning(f'Memory usage too high. Restarting browser: {brow}')
                         await clear_brows_f(pw, brow)
 
-                    # Check network connection
-                    await ping_begin()
-
-
             except Exception:
                 logger.exception(f'\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
                 await asyncio.sleep(2)
 
 
         # Scrape complete. Close browsers
-        for i in brow_l:
-            await i.close()
-
-        try: await session.close()
-        except Exception as errex: logger.exception(f'__err nah already {errex}')
-
-
-
         logger.info(f'  Scrape complete  '.center(70, '='))
+        try:
+            for i in brow_l:
+                await i.close()
+            await session.close()
+        except Exception:
+            logger.exception(f'Browser close error')
+
+
 
 
 
@@ -1106,6 +1099,7 @@ res_brow_set = set()
 #jbw_tally_ml = [] # Used to determine the frequency that jbws are used (debugging)
 
 # Set paths to files
+results_path = os.path.join(dater_path, 'results')
 queue_path = os.path.join(dater_path, 'queue')
 checked_path = os.path.join(dater_path, 'checked_pages')
 error_path = os.path.join(dater_path, 'errorlog')
@@ -1415,15 +1409,13 @@ except:
 
 
 
-dater_d = glob.glob(jorb_home + "/*") # List all date dirs
-dater_d.sort(reverse=True)
 
-# Select old and current results dirs
-cur_dater_results_dir = os.path.join(dater_d[0], 'results')
-file_count = 0
-org_count = 0
+
+
 
 # Allow one URL to cover multiple orgs
+file_count = 0
+org_count = 0
 for db_type, url_d in multi_org_d.items():
 
     for url, org_names_l in url_d.items():
@@ -1431,7 +1423,7 @@ for db_type, url_d in multi_org_d.items():
         # URL is used by more than one org
         if len(org_names_l) > 1:
 
-            src_path = os.path.join(cur_dater_results_dir, db_type, org_names_l[0]) # Path to results of first org in list
+            src_path = os.path.join(results_path, db_type, org_names_l[0])  # Path to results of first org in list
 
             # Check if results exists for first org
             if os.path.isdir(src_path):
@@ -1439,8 +1431,8 @@ for db_type, url_d in multi_org_d.items():
 
                 # Copy results from first org to all remaining orgs
                 for dst_path in org_names_l[1:]:
-                    dst_path = os.path.join(cur_dater_results_dir, db_type, dst_path)
-                    logger.debug(f'to: {dst_path}')
+                    dst_path = os.path.join(results_path, db_type, dst_path)
+                    logger.debug(f'to:      {dst_path}')
                     try: shutil.copytree(src_path, dst_path)
                     except Exception: logger.exception(f'multiorg copy error')
                     file_count += 1
@@ -1456,42 +1448,36 @@ logger.info(f'Multi org files: {file_count}')
 
 
 # Fallback to older results if newer results are missing
-# Skip this part if there are no old results
-if len(dater_d) > 1:
-    logger.info(f'\nFalling back to old results ...')
-    logger.info(f'{dater_d[1]}')
+dater_d = glob.glob(jorb_home + "/*")  # List all date dirs
+dater_d.sort(reverse=True)
+if len(dater_d) > 1:  # Skip if there are no old results
+    logger.info(f'\nFalling back to old results: {dater_d[1]}')
     old_dater_results_dir = os.path.join(dater_d[1], 'results')
     count = 0
 
     # Loop through each results dir
-    for each_db in ['/civ', '/sch', '/uni']:
+    for each_db in ['civ', 'sch', 'uni']:
 
         # Select old and current db dirs
-        cur_db_dir = cur_dater_results_dir + each_db + '/*'
-        old_db_dir = old_dater_results_dir + each_db + '/*'
-        inc_old_dir = cur_dater_results_dir + '/include_old' + each_db
+        cur_db_dir = os.path.join(results_path, each_db)
+        old_db_dir = os.path.join(old_dater_results_dir, each_db)
+        inc_old_dir = os.path.join(results_path, 'include_old', each_db)
 
         # Loop through each org name dir in the old db type dir
-        for old_org_name_path in glob.glob(old_db_dir):
-
-            # Remove path from org name
-            old_org_name = str(old_org_name_path.split('/')[7:])[2:-2]
+        for old_org_name_path in glob.glob(old_db_dir + '/*'):
+            old_org_name = old_org_name_path.split('/')[-1]  # Remove path from org name
 
             # Check current db dir
-            for cur_org_name_path in glob.glob(cur_db_dir):
-
-                # Remove path from org name
-                cur_org_name = str(cur_org_name_path.split('/')[7:])[2:-2]
+            for cur_org_name_path in glob.glob(cur_db_dir + '/*'):
 
                 # Skip if the new dir has the result
+                cur_org_name = cur_org_name_path.split('/')[-1]
                 if old_org_name == cur_org_name:
                     break
 
-            # If old org name dir is missing
+            # If new org name dir is missing
             else:
-
-                # Make old_include/old_org_name dir
-                inc_org_name_path = inc_old_dir + '/' + old_org_name
+                inc_org_name_path = inc_old_dir + '/' + old_org_name  # Make old_include/old_org_name dir
 
                 # Copy old org name dir to db type include_dir
                 if not os.path.exists(inc_org_name_path):

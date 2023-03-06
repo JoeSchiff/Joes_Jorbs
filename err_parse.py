@@ -8,11 +8,10 @@
 # To do:
 # switch to delim char. - where?
 # count how many recoveries from each error
-# dup_checker on recurring errors urls?
-# use dates instead of errorlog_d1 etc +
 # always include a and b ? or just b?
 # distinguish jj_error a and b for: 2-7
-# merge with auto blacklist
+# merge with auto blacklist +
+# switch to logging +
 
 
 
@@ -21,14 +20,16 @@
 
 import glob, json, sys, logging
 
+
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+#logger.setLevel(logging.DEBUG)
 
 
 all_d = {}  # Dict for holding all errorlogs
 using_l = []  # Only for convience
 
-logger.warning(f'{sys.argv}')
+logger.info(f'{sys.argv}')
 
 # No args. Use 3 most recent
 num_files = 2
@@ -44,7 +45,7 @@ if len(sys.argv) > 1:
     if sys.argv[1].isnumeric():
         num_files = int(sys.argv[1])
 
-        logger.warning(f'Using number of files: {num_files}')
+        logger.info(f'Using number of files: {num_files}')
 
     # Use user-supplied specific files
     else:
@@ -52,7 +53,7 @@ if len(sys.argv) > 1:
         dater = sys.argv[1:]  # find errorlogs in args
         dater.sort(reverse=True)
         dater_dir_pos = 0  # start at pos 1
-        #logger.warning(f'Using files:', dater)
+        #logger.info(f'Using files:', dater)
     
 
 
@@ -67,19 +68,19 @@ for err_log_num in range(1, (num_files + 1)):
             date_s = dater[dater_dir_pos].split('/')[4]
             with open(dater[dater_dir_pos] + '/errorlog', 'r') as f:
                 all_d[date_s] = json.loads(f.read())
-                logger.warning(f'Using: {date_s}')
+                logger.info(f'Using: {date_s}')
                 using_l.append(date_s)
                 dater_dir_pos += 1  # inc to next errorlog on pass or fail
                 break
         
         ## if any user speced files fails, it will be fatal error
         except Exception as errex:
-            logger.warning(f'some error: {errex} {sys.exc_info()[2].tb_lineno}')
+            logger.info(f'some error: {errex} {sys.exc_info()[2].tb_lineno}')
             '''
             if 'Expecting property name enclosed in double quotes' in str(errex):
-                logger.warning(f'Failed:', dater[dater_dir_pos].split('/')[4], 'prob due to partial scrape')
+                logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], 'prob due to partial scrape')
             else:
-                logger.warning(f'Failed:', dater[dater_dir_pos].split('/')[4], errex)
+                logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], errex)
             '''
             dater_dir_pos += 1  # inc to next errorlog on pass or fail
 
@@ -130,55 +131,55 @@ for url, value in all_d[list(all_d)[0]].items():
 
 
 # Display error code summaries
-logger.warning(f'\njj_error 1: Crawler')
-logger.warning(f'jj_error 2: Non-HTML')
-logger.warning(f'jj_error 3: Request timeout')
-logger.warning(f'jj_error 4: HTTP 404 / 403')
-logger.warning(f'jj_error 5: Other request')
-logger.warning(f'jj_error 6: Unknown request')
-logger.warning(f'jj_error 7: Empty vis text')
-logger.warning(f'jj_error 8: Looper timeout')
-logger.warning(f'jj_error 9: Unknown looper')
+logger.info(f'\njj_error 1: Crawler')
+logger.info(f'jj_error 2: Non-HTML')
+logger.info(f'jj_error 3: Request timeout')
+logger.info(f'jj_error 4: HTTP 404 / 403')
+logger.info(f'jj_error 5: Other request')
+logger.info(f'jj_error 6: Unknown request')
+logger.info(f'jj_error 7: Empty vis text')
+logger.info(f'jj_error 8: Looper timeout')
+logger.info(f'jj_error 9: Unknown looper')
 
 
 # Errorlog1 total errors
-logger.warning(f'\n\n\n ------ Most recent errorlog: {using_l[0]} ------')
+logger.info(f'\n\n\n ------ Most recent errorlog: {using_l[0]} ------')
 total = 0
 max_val = max(len(x) for x in total_d.values())  # Length of longest value, most frequent error
-logger.warning(f'\nTotal errors:')
+logger.info(f'\nTotal errors:')
 for k, v in total_d.items():
     row = k + ':', len(v), '', '=' * int(len(v) * 100 / max_val)  # Determine number of chars to represent as a percent of max_val
-    logger.warning(f'jj_error {"".join(str(word).ljust(4) for word in row)}')  # Format and pad each element in row list for pretty print
+    logger.info(f'jj_error {"".join(str(word).ljust(4) for word in row)}')  # Format and pad each element in row list for pretty print
     total += len(v)
-logger.warning(f'total:', total)
+logger.info(f'total: {total}')
 
 # Errorlog1 final errors
 total = 0
 #max_val = max(len(x) for x in final_d.values())  ## uncomment to not use previous max_val and scale
-logger.warning(f'\nFinal errors:')
+logger.info(f'\nFinal errors:')
 for k, v in final_d.items():
     row = k + ':', len(v), '', '=' * int(len(v) * 100 / max_val)
-    logger.warning(f'jj_error {"".join(str(word).ljust(4) for word in row)}')
+    logger.info(f'jj_error {"".join(str(word).ljust(4) for word in row)}')
     total += len(v)
-logger.warning(f'total: {total}')
+logger.info(f'total: {total}')
 
 
 
 
 '''
-logger.warning(f'\nEmpty vis text errors:')
-logger.warning(f'jj_7a_tally:', len(jj_7a_l))
-logger.warning(f'jj_7b_tally:', len(jj_7b_l))
+logger.info(f'\nEmpty vis text errors:')
+logger.info(f'jj_7a_tally:', len(jj_7a_l))
+logger.info(f'jj_7b_tally:', len(jj_7b_l))
 
 # URLs recovered from 7a error
 for i in jj_7a_l:
-    if not i in jj_7b_l: logger.warning(fi)
+    if not i in jj_7b_l: logger.info(fi)
 
-logger.warning(f'jj_7c_tally:', len(jj_7c_l), '\n\n')
+logger.info(f'jj_7c_tally:', len(jj_7c_l), '\n\n')
 
 # URLs recovered from 7b error
 for i in jj_7b_l:
-    if not i in jj_7c_l: logger.warning(fi)
+    if not i in jj_7c_l: logger.info(fi)
 '''
 
 
@@ -195,15 +196,15 @@ for date_name, errorlog in all_d.items():
             all_fin_l.append(url_k)
 
 
-logger.warning(f'Fallback to homepage successes: {len(fallback_l)}')
+logger.info(f'Fallback to homepage successes: {len(fallback_l)}')
 
 
 
 # Number of final errors in each errorlog
-logger.warning(f'\n\n\n ------ All errorlogs: {using_l} ------')
-logger.warning(f'\nFinal errors:')
+logger.info(f'\n\n\n ------ All errorlogs: {using_l} ------')
+logger.info(f'\nFinal errors:')
 for k, v in fin_l_d.items():
-    logger.warning(f'{k}: {len(v)}')
+    logger.info(f'{k}: {len(v)}')
 
 
 
@@ -213,15 +214,15 @@ for i in all_fin_l:
     if all_fin_l.count(i) == num_files:
         rec_errs_l.append(i)
     elif all_fin_l.count(i) > num_files:
-        logger.warning(f'\nthis should never happen\n')
+        logger.info(f'\nthis should never happen\n')
 
 rec_errs_l = list(dict.fromkeys(rec_errs_l))  # remove dups
 
 # Display recurring final error URLs
-logger.warning(f'\n\nRecurring final errors: {len(rec_errs_l)} \n\n')
+logger.info(f'\n\nRecurring final errors: {len(rec_errs_l)} \n\n')
 
 for i in rec_errs_l:
-    logger.warning(f'{i}')
+    logger.info(f'{i}')
 
 
 
