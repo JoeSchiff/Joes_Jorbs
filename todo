@@ -7,10 +7,14 @@ pickle.dump() start giving "maximum recursion depth exceeded while calling a Pyt
 Todo:
 replace with with async with when necessary + might fix pickle recursion error -
 static resp.close and session.close() - already closed with context managers
+why conf in cml?
+rewrite errorlog using logging
 
 refactor
   any func with instance as arg should be method?
   clean return unn?
+  shared req success and fail handling
+    sep content error
   
 separate functions
   jbw count and write file +
