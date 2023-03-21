@@ -13,8 +13,10 @@ rewrite errorlog using logging
 refactor
   any func with instance as arg should be method?
   clean return unn?
-  shared req success and fail handling
-    sep content error
+  shared req fail handling
+    jj error 3 and 6 +
+    polymorphism requester class?
+    sep content error +
   
 separate functions
   jbw count and write file +
@@ -28,6 +30,7 @@ separate functions
 
 logging module
   always print task id + when available
+    new id is assigned when using static reqs
   must include stderr +
   determine log levels +
 

@@ -353,8 +353,10 @@ async def choose_requester(working_o, task_id, pw, session):
     try:
         if working_o.req_attempt_num < 3:
             await pw_req(working_o, task_id, pw)
+
         elif working_o.req_attempt_num < 5:
             await asyncio.wait_for(static_req(working_o, task_id, session), timeout=30)
+
         else:
             logger.info(f'All retries exhausted: {working_o.workingurl} {working_o.req_attempt_num}')
             working_c.prog_count += 1
@@ -426,7 +428,7 @@ def req_success(working_o):
 
 
 # Select pw browser, create context and page
-async def get_pw_brow(pw, task_id):
+async def get_pw_brow(pw):
     for brow in brow_l:
         try:
             context = await brow.new_context(ignore_https_errors=True)  ## slow execution here?
@@ -448,92 +450,61 @@ async def get_pw_brow(pw, task_id):
 
 
 # Playwright requester
-@timeout_decorator.timeout(20)
+#@timeout_decorator.timeout(20)
 async def pw_req(working_o, task_id, pw):
-    logger.debug(f'here1')
-    # Select pw browser, context, and page
-    context, page = await get_pw_brow(pw, task_id)
-    # Request URL
+    workingurl = working_o.workingurl
+    context, page = await get_pw_brow(pw)
+
     try:
-        workingurl = working_o.workingurl
         logger.debug(f'start pw req: {workingurl}')
-        resp = await page.goto(workingurl)
-        #await resp.finished()
+        resp = await page.goto(workingurl)  # Request
         await page.wait_for_load_state('networkidle')
         logger.debug(f'end pw req: {workingurl}')
         logger.debug(f'req timer: {resp.request.timing["responseEnd"]}')
 
+        if soft_404_check(working_o, resp, 'a'): return
 
-        # Forbidden content types. only works with firefox
-        if 'application/pdf' in resp.headers['content-type']:
-            logger.info(f'jj_error 2: Forbidden content type:')
-            add_errorurls(working_o, 'jj_error 2', 'Forbidden content type', False)
-            return
-
-        stat_code = resp.status
-        stat_text = f'{stat_code} {resp.status_text}'
-        red_url = resp.url
-
-        # Success
-        if stat_code == 200:
+        # Success. Get content
+        if resp.status == 200:
             logger.info(f'pw req success {workingurl}')
-
-            # Get child frame content recursively
-            try:
-                logger.debug(f'begin frame loop: {workingurl} {len(page.frames)}')
-                ret_t = await asyncio.wait_for(child_frame(page.main_frame, task_id), timeout=3)  # Prevent child frames from hanging forever
-                html = '\n' + ret_t[0]
-                vis_text = '\n' + ret_t[1]
-                logger.debug(f'end frame loop: {workingurl}')
-
-            # Fallback to html without child frame content
-            except asyncio.TimeoutError:
-                logger.warning(f'child frame timeout {workingurl}')
-                html = await page.content()
-                vis_text = await page.inner_text('body')
-            ## redundant?
-            except Exception as errex:
-                logger.warning(f'other child frame __error: {errex} {workingurl}')
-                html = await page.content()
-                vis_text = await page.inner_text('body')
-
-            finally:
-                working_o.add_html(html, vis_text, red_url, 'pw_browser')
-
-        # Request errors
-        # Don't retry
-        elif stat_code == 404 or stat_code == 403:
-            logger.warning(f'jj_error 4: {workingurl} {stat_text}')
-            add_errorurls(working_o, 'jj_error 4', stat_text, False)
-
-        # Retry
+            red_url = resp.url
+            html, vis_text = await get_page_content(workingurl, page)
+            working_o.add_html(html, vis_text, red_url, f'pw_browser')
         else:
-            logger.warning(f'jj_error 5: request error: {workingurl} {stat_text}')
-            add_errorurls(working_o, 'jj_error 5', stat_text, True)
-            if stat_code == 429:
-                logger.warning(f'__error 429 {workingurl}')
-                await asyncio.sleep(4)
+            resp_err_handler(workingurl, page, resp, resp.status_text, 'a')
 
-    # Timeout
-    except TimeoutError:
-        logger.warning(f'jj_error 3: Timeout {workingurl}')
-        add_errorurls(working_o, 'jj_error 3', 'Timeout', True)
-
-    # Error
     except Exception as errex:
-        logger.warning(f'jj_error 6: playwright error: {workingurl} {sys.exc_info()[2].tb_lineno}')
-        add_errorurls(working_o, 'jj_error 6', str(errex), True)
+        failed_req_handler(working_o, errex, 'a')
 
-    # Close and return
     finally:
         try:
             await context.close()
         except Exception:
-            logger.exception(f'cant close context')
+            logger.exception(f'cant close pw context')
+
+
+# Content from main and child frames
+async def get_page_content(workingurl, page):
+    logger.debug(f'begin frame loop: {workingurl} {len(page.frames)}')
+
+    # Main frame content
+    try:
+        ret_t = await asyncio.wait_for(get_iframes_content(page.main_frame), timeout=3)
+        html = f'\n{ret_t[0]}'
+        vis_text = f'\n{ret_t[1]}'
+        logger.debug(f'end frame loop: {workingurl}')
+
+    # Fallback to html without child frame content
+    except Exception as errex:
+        logger.warning(f'child frame error: {errex} {workingurl}')
+        html = await page.content()
+        vis_text = await page.inner_text('body')
+
+    return html, vis_text
 
 
 # Recursive child frame explorer
-async def child_frame(frame, task_id):
+async def get_iframes_content(frame):
     try:
 
         # Discard useless frames
@@ -544,68 +515,85 @@ async def child_frame(frame, task_id):
         html = await frame.content()
         vis_text = await frame.inner_text('body')
 
-        # Get child frame content
-        #logger.debug(f'num child frames: {len(frame.child_frames)} {frame}')
-        for c_f in frame.child_frames:
-            ret_t = await child_frame(c_f, task_id)
-            html += '\n' + ret_t[0]
-            vis_text += '\n' + ret_t[1]
-            logger.debug(f'child frame appended: {frame.url}')
+        # Append recursive child frame content
+        logger.debug(f'num child frames: {len(frame.child_frames)} {frame}')
+        for child_frame in frame.child_frames:
+            ret_t = await get_iframes_content(child_frame)
+            html += f'\n{ret_t[0]}'
+            vis_text += f'\n{ret_t[1]}'
+            #logger.debug(f'child frame appended: {frame.url}')
 
         return html, vis_text
 
     except Exception as errex:
-        logger.warning(f'child_frame_f __error: {errex}')
+        logger.warning(f'get_iframes_content_f __error: {errex}')
         return "", ""
+
+
+# Forbidden content types. only works with firefox
+def soft_404_check(working_o, resp, ec_char):
+    content_type = resp.headers['content-type']
+
+    if 'application/pdf' in content_type:
+        logger.info(f'jj_error 2{ec_char}: Forbidden content type: {working_o.workingurl}')
+        add_errorurls(working_o, 'jj_error 2{ec_char}', 'Forbidden content type', False)
+        return True
+    elif 'text/html' not in content_type:
+        logger.warning(f'Unknown forbidden content type: {content_type} {working_o.workingurl}')
+
+
+# Act on response status number
+def resp_err_handler(working_o, page, resp, stat_text, ec_char):
+
+    # Don't retry req
+    if resp.status == 404 or resp.status == 403:
+        logger.warning(f'jj_error 4{ec_char}: {working_o.workingurl} {stat_text}')
+        add_errorurls(working_o, 'jj_error 4{ec_char}', stat_text, False)
+
+    # Retry req
+    else:
+        logger.warning(f'jj_error 5{ec_char}: request error: {working_o.workingurl} {stat_text}')
+        add_errorurls(working_o, 'jj_error 5{ec_char}', stat_text, True)
+        if resp.status == 429:  ## unn?
+            logger.warning(f'__error 429 {working_o.workingurl}')
+
+
+# Errors not from status code
+def failed_req_handler(working_o, errex, ec_char):
+    if isinstance(errex, asyncio.TimeoutError):
+        logger.warning(f'jj_error 3{ec_char}: Timeout {working_o.workingurl}')
+        add_errorurls(working_o, 'jj_error 3{ec_char}', 'Timeout', True)
+
+    else:
+        logger.warning(f'jj_error 6{ec_char}: playwright error: {working_o.workingurl} {sys.exc_info()[2].tb_lineno}')
+        add_errorurls(working_o, 'jj_error 6{ec_char}', str(errex), True)
 
 
 # Static requester
 async def static_req(working_o, task_id, session):
-
     workingurl = working_o.workingurl
+    print('task_id=', task_id)
+    logger.debug(f'task_id= {task_id}')
+    logger.debug(f'start static req: {workingurl}')
 
     try:
-        logger.debug(f'start static req: {workingurl}')
-        async with session.get(workingurl, headers={'User-Agent': user_agent_s}, ssl=False) as resp:
+        async with session.get(workingurl, headers={'User-Agent': user_agent_s}, ssl=False) as resp:  # Req
             logger.debug(f'end static req: {workingurl}')
-
-            # Must detect forbidden content types before getting html
-            if 'application/pdf' in resp.headers['content-type']:
-                logger.info(f'jj_error 2b: Forbidden content type:')
-                add_errorurls(working_o, 'jj_error 2b', 'Forbidden content type (static)', False)
-                return
-
-            html = await resp.text()
-            red_url = str(resp.url)
-            stat_code = resp.status
-            stat_text = f'{stat_code} {resp.reason}'
+            if soft_404_check(working_o, resp, 'b'): return  # Must detect forbidden content types before getting html
 
             # Success
-            if stat_code == 200:
-                logger.info(f'Static req success: {workingurl} {stat_code}')
+            if resp.status == 200:
+                logger.info(f'Static req success: {workingurl}')
+                html = await resp.text()
+                vis_text = vis_soup_f(html)  # Get vis soup
                 working_o.add_html(html, vis_text, red_url, 'static_browser')
-                vis_text = vis_soup(html)  # Get vis soup
-
-            # Don't retry
-            elif stat_code == 404 or stat_code == 403:
-                logger.warning(f'jj_error 4b: {workingurl} {stat_text}')
-                add_errorurls(working_o, 'jj_error 4b', stat_text, False)
-
-            # Retry
             else:
-                logger.warning(f'jj_error 5b: request error: {workingurl} {stat_text}')
-                add_errorurls(working_o, 'jj_error 5b',  stat_text, True)
-
-    except asyncio.TimeoutError:
-        logger.warning(f'jj_error 3b: Timeout {workingurl}')
-        add_errorurls(working_o, 'jj_error 3b', 'Timeout', True)
+                resp_err_handler(workingurl, page, resp, resp.reason, 'b')
 
     except Exception as errex:
-        logger.warning(f'jj_error 6b: Other Req {workingurl}')
-        add_errorurls(working_o, 'jj_error 6b', str(errex), True)
+        failed_req_handler(working_o, errex, 'b')
 
-    finally:
-        return True
+
 
 
 
@@ -672,7 +660,7 @@ def final_error(working_o):
 
 
 # Separate the visible text from HTML
-def vis_soup(html):
+def get_vis_soup(html):
 
     vis_soup = BeautifulSoup(html, 'html5lib').find('body')  # Select body
 
