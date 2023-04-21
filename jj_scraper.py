@@ -1096,9 +1096,19 @@ async def main():
         except Exception as errex: print('__err nah already', errex)
 
 
+<<<<<<< Updated upstream
 
         logger.info(f'\n\n\n\n =============================  Scrape complete  =============================')
 
+=======
+async def cleanup():
+    try:
+        for brow in brow_l:
+            await brow.close()
+    except Exception:
+        logger.exception(f'\ncant close pw brow')
+ 
+>>>>>>> Stashed changes
 
 
 
