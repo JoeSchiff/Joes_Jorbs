@@ -1,40 +1,33 @@
 
 errors:
-pickle.dump() start giving "maximum recursion depth exceeded while calling a Python object +
+progress higher than total + homepage fallback
 
 
 
 Todo:
-replace with with async with when necessary + might fix pickle recursion error -
-static resp.close and session.close() - already closed with context managers
 why conf in cml?
 rewrite errorlog using logging
+use pw req obj for ping
+    ping as child class of pw?
 
 refactor
   any func with instance as arg should be method?
   clean return unn?
-  shared req fail handling
+  shared req fail handling +
     jj error 3 and 6 +
-    polymorphism requester class?
+    polymorphism requester class +
     sep content error +
-  
+
 separate functions
-  jbw count and write file +
   robots and proceed
-  looper
-  pw reqer
-    combine success and fail conditions for pw and static
-  pagination +
-  check net +
   post scrape
 
 logging module
   always print task id + when available
     new id is assigned when using static reqs
-  must include stderr +
-  determine log levels +
 
 handle timeouts uniformly +
+  asyncio.TimeoutError not possible without wait_for?
   check async timeout again
   child frames
 
@@ -66,27 +59,11 @@ cleanup before release:
 
 pagination class never works. test 'next' or '>' test +
 set playwright user agent?
-all (working_o) funcs as class methods
-different working_o classes: -
-    before req: add_to_queue
-    during: add_html, vis_soup_f, pw_req, static_req, child_frame
-    after: fallback_success, check_red, check_vis_text, write_results, crawler
-    errors? anytime?
-    before and after are same. loop is a circle
 use asyncio.Event() instead of blocking: all_done_d,l pw_pause, asyncio.sleep
 net::ERR_NAME_NOT_RESOLVED should also be 404
-call crawler from add_html method?
-all pause for static if bash ping fails
 include error result in working_o?
 need checked lock? - dup ensures a url is processed only once, therefore one task at a time
 cml as a class?
-looper should be only handle which requester to use. main before and after?
-aiofiles for async file ops
-only use async when neccesary:
-    reqs: looper
-    IO: write results, save prog, prant?
-dont have sync and async versions of dup_check and checked_entry +
-why use methods?
 check for malformed urls? >>> r=urlparse('http:/joesjorbs.com') >>> if r.scheme and r.netloc: print(99)
 rewrite crawler
 prog count higher than total
@@ -97,12 +74,10 @@ all pause +
 redundant error 7
   final or try with next reqer?
   pw gets html and vis
-replacement for pkill -9 node/firefox
 discard head elem from html. page.inner_html('body')
   resp.text vs page.inner_html vs page.text_content vs page.content() etc
 establish new jj_error numbers and letters
 add redirect history to checked pages. can be done with aiohttp, cant find for pw
-state what each func returns at top of func
 parent url may not be in errorlog on first error - remove code
 
 update portals

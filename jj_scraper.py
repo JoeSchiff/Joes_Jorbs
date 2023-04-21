@@ -31,24 +31,23 @@ from urllib import parse, robotparser
 
 startTime = datetime.now()
 
+from constants import *
 
-# Date dir to put results into
-jorb_home = '/home/joepers/joes_jorbs'
-dater = date.today().isoformat()
-dater_path = os.path.join(jorb_home, dater)
-results_path = os.path.join(dater_path, 'results')
 
-db_types = ('civ', 'sch', 'uni')
-for db in db_types:
-    db_path = os.path.join(results_path, db)
+
+# Dirs for results
+for db in DB_TYPES:
+    db_path = os.path.join(RESULTS_PATH, db)
     if not os.path.exists(db_path):
         os.makedirs(db_path)
 
-
 # Dir for rp and autoblacklist files
-persistent_path = os.path.join(jorb_home, '.persistent')
-if not os.path.exists(persistent_path):
-    os.makedirs(persistent_path)
+if not os.path.exists(PERSISTENT_PATH):
+    os.makedirs(PERSISTENT_PATH)
+
+# Dir for error 7 files
+if not os.path.exists(ERR7_PATH):
+    os.makedirs(ERR7_PATH)
 
 
 # Append asyncio task id if available to log
@@ -64,8 +63,7 @@ class context_filter(logging.Filter):
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
-log_path = os.path.join(dater_path, 'log_file')
-f_handler = logging.FileHandler(log_path, mode='a')
+f_handler = logging.FileHandler(LOG_PATH, mode='a')
 f_handler.setLevel(logging.DEBUG)
 f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s %(task_id)s', datefmt='%H:%M:%S')
 f_handler.setFormatter(f_format)
@@ -103,22 +101,15 @@ class working_c:
         self.req_attempt_num = req_attempt_num
         self.domain = '://'.join(parse.urlparse(workingurl)[:2])  # Includes scheme and www. Used for building abspaths from rel links
         self.dup_domain = workingurl_dup.split('/')[0]  # Used for domain limiter
+
         # Select jbw list. Used for weighing confidence and finding links
         if self.jbw_type == 'civ':
-            self.jbws_high_conf = jbws_civ_high
-            self.jbws_low_conf = jbws_civ_low
+            self.jbws_high_conf = JBWS_CIV_HIGH
+            self.jbws_low_conf = JBWS_CIV_LOW
         else:
-            self.jbws_high_conf = jbws_su_high
-            self.jbws_low_conf = jbws_su_low
+            self.jbws_high_conf = JBWS_SU_HIGH
+            self.jbws_low_conf = JBWS_SU_LOW
 
-    # After successful request
-    def add_html(self, html, vis_text, red_url, browser):
-        self.html = html
-        self.vis_text = vis_text.lower()
-        self.red_url = red_url
-        self.browser = browser
-        self.soup = BeautifulSoup(html, 'html5lib').find('body')
-        logger.debug(f'added html: {red_url}')
 
     # Print important attributes
     def __str__(self):
@@ -186,31 +177,6 @@ class working_c:
         return True
 
 
-    # Reduce excess whitespace with regex and check for minimum content
-    def check_vis_text(self):
-
-        self.vis_text = re.sub(white_reg, " ", self.vis_text)
-
-        # Skip if there is no useable visible text / soft 404s
-        if len(self.vis_text) < empty_cutoff:
-
-            # Mark error
-            logger.warning(f'jj_error 7: Empty vis text: {self.workingurl} {len(self.vis_text)}')
-            add_errorurls(self, 'jj_error 7', 'Empty vis text', False)
-
-            # Debug err7
-            url_path = parse.quote(self.workingurl, safe=':')
-            html_path = os.path.join(err7_path, url_path)
-            with open(html_path[:254], "w", encoding='ascii', errors='ignore') as write_html:
-                write_html.write(self.vis_text)
-
-            # Dont retry
-            return False
-
-        # Success
-        else:
-            return True
-
     # Determine confidence that a page has job postings
     def count_jbws(self):
 
@@ -233,7 +199,7 @@ class working_c:
             return
 
         # Make dir
-        org_path = os.path.join(results_path, self.jbw_type, self.org_name)
+        org_path = os.path.join(RESULTS_PATH, self.jbw_type, self.org_name)
         if not os.path.exists(org_path):
             os.makedirs(org_path)
 
@@ -251,11 +217,211 @@ class working_c:
 
 
 
+
+class requester_base:
+    def __init__(self, working_o):
+        self.url = working_o.workingurl
+
+
+    # Exclude forbidden content types. ex: pdf
+    def content_type_check(self, working_o):
+        content_type = self.resp.headers['content-type']
+        if 'text/html' in content_type:
+            return True
+        else:
+            logger.info(f'jj_error 2{self.ec_char}: Forbidden content type: {content_type} {self.url}')
+            add_errorurls(working_o, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
+            return False
+
+
+    # Check for minimum amount of content. ex soft 404
+    def check_vis_text(self, working_o):
+        logger.debug(f'begin check_vis_text {self.url}')
+        self.vis_text = re.sub(WHITE_REG, " ", self.vis_text).lower()  # Reduce excess whitespace with regex 
+
+        if len(self.vis_text) > EMPTY_CUTOFF:
+            return True
+        else:
+            logger.warning(f'jj_error 7: Empty vis text: {self.url} {len(self.vis_text)}')
+            add_errorurls(working_o, 'jj_error 7', 'Empty vis text', False)
+
+            # Debug err7 by saving to separate dir
+            url_path = parse.quote(self.url, safe=':')
+            html_path = os.path.join(ERR7_PATH, url_path)
+            with open(html_path[:254], "w", encoding='ascii', errors='ignore') as write_html:
+                write_html.write(self.vis_text)
+
+            return False  # Dont retry
+
+
+    # Copy resp data to working_o
+    def add_html(self, working_o):
+        working_o.html = self.html
+        working_o.vis_text = self.vis_text
+        working_o.red_url = self.resp.url
+        working_o.browser = self.name
+        working_o.soup = BeautifulSoup(self.html, 'html5lib').find('body')
+        logger.debug(f'added html: {self.url}')
+
+
+    # Act on response status number
+    def resp_err_handler(self, working_o):
+
+        # Don't retry req
+        if self.resp.status == 404 or self.resp.status == 403:
+            logger.warning(f'jj_error 4{self.ec_char}: {self.url} {self.status_text}')
+            add_errorurls(working_o, f'jj_error 4{self.ec_char}', self.status_text, False)
+
+        # Retry req
+        else:
+            logger.warning(f'jj_error 5{self.ec_char}: request error: {self.url} {self.status_text}')
+            add_errorurls(working_o, f'jj_error 5{self.ec_char}', self.status_text, True)
+
+
+    # Errors not from status code
+    def failed_req_handler(self, working_o, errex):
+        if isinstance(errex, asyncio.TimeoutError) or isinstance(errex, TimeoutError):
+            logger.warning(f'jj_error 3{self.ec_char}: Timeout {self.url}')
+            add_errorurls(working_o, f'jj_error 3{self.ec_char}', 'Timeout', True)
+
+        else:
+            logger.warning(f'jj_error 6{self.ec_char}: playwright error: {errex} {self.url} {sys.exc_info()[2].tb_lineno}')
+            add_errorurls(working_o, f'jj_error 6{self.ec_char}', str(errex), True)
+
+
+
+class pw_req(requester_base):
+    def __init__(self, pw, working_o):
+        self.name = 'pw'
+        self.ec_char = 'a'
+        self.pw = pw
+        super().__init__(working_o)
+
+    # Select pw browser, create context and page
+    async def get_pw_brow(self):
+        for brow in brow_l:
+            try:
+                self.context = await brow.new_context(ignore_https_errors=True)  ## slow execution here?
+                self.page = await self.context.new_page()
+                self.page.set_default_navigation_timeout(20000)
+                logger.debug(f'using brow: {brow._impl_obj._browser_type.name}')
+                return
+            # Remove browser from available list on error
+            except Exception:
+                logger.exception(f'error creating context or page')
+                await clear_brows(pw, brow)
+
+        # No browser available
+        else:
+            logger.warning(f'brow list empty')
+            await asyncio.sleep(4)
+
+
+    async def request_url(self):
+        logger.info(f'begin req pw {self.url}')
+        await self.get_pw_brow()
+        self.resp = await self.page.goto(self.url)
+        await self.page.wait_for_load_state('networkidle')
+        self.status_text = f'{self.resp.status} {self.resp.status_text}'
+        logger.info(f'end req pw {self.url}')
+
+
+    async def get_content(self):
+        logger.debug(f'begin frame loop: {self.url} {len(self.page.frames)}')
+
+        # Main frame and child frame content
+        try:
+            self.html, self.vis_text = await asyncio.wait_for(self.get_iframes_content(self.page.main_frame), timeout=3)
+            logger.debug(f'end frame loop: {self.url}')
+
+        # Fallback to no child frame content
+        except Exception as errex:
+            logger.warning(f'child frame error: {errex} {self.url}')
+            self.html = await self.page.content()
+            self.vis_text = await self.page.inner_text('body')
+
+
+    # Recursive child frame explorer
+    async def get_iframes_content(self, frame):
+        try:
+            # Discard useless frames
+            if frame.name == "about:srcdoc" or frame.name == "about:blank" or not frame.url or frame.url == "about:srcdoc" or frame.url == "about:blank" or frame.is_detached():
+                return "", ""
+
+            # Current frame content
+            html = await frame.content()
+            vis_text = await frame.inner_text('body')
+
+            # Append recursive child frame content
+            logger.debug(f'num child frames: {len(frame.child_frames)} {frame}')
+            for child_frame in frame.child_frames:
+                ret_t = await self.get_iframes_content(child_frame)
+                html += ret_t[0]  ## cant do augmented assignment on multiple targets
+                vis_text += ret_t[1]
+                #logger.debug(f'child frame appended: {frame.url}')
+
+            return f'\n{html}', f'\n{vis_text}'
+
+        except Exception as errex:
+            logger.warning(f'get_iframes_content_f __error: {errex}')
+            return "", ""
+
+
+    async def close(self):
+        print('no way')
+        try:
+            await self.context.close()
+        except Exception:
+            logger.exception(f'cant close pw context')
+
+
+
+class static_req(requester_base):
+    def __init__(self, session, working_o):
+        self.name = 'static'
+        self.ec_char = 'b'
+        self.session = session
+        super().__init__(working_o)
+
+    async def request_url(self):
+        self.resp = await self.session.get(self.url, headers={'User-Agent': USER_AGENT_S}, ssl=False)
+        self.status_text = f'{self.resp.status} {self.resp.reason}'
+
+
+    async def get_content(self):
+        self.html = await self.resp.text()
+        self.vis_text = self.get_vis_text()
+
+
+    def get_vis_text(self):
+        vis_soup = BeautifulSoup(self.html, 'html5lib').find('body')
+        for x in vis_soup(["script", "style"]):  # Remove script, style, and empty elements
+            x.decompose()
+        for x in vis_soup.find_all('', {"style" : STYLE_REG}):  # Remove all of the hidden style attributes  ## unn?
+            x.decompose()
+        for x in vis_soup.find_all('', {"type" : 'hidden'}):  # Type="hidden" attribute
+            x.decompose()
+        for x in vis_soup(class_=CLASS_REG):  # Hidden section(s) and dropdown classes
+            x.decompose()
+        return vis_soup.text
+
+
+    async def close(self):
+        if not hasattr(self, 'resp'):
+            logger.warning(f'static response does not exist')
+        else:
+            try:
+                self.resp.close()
+            except Exception:
+                logger.exception(f'cant close static response')
+
+
+
+
+
 # Removes extra info from urls to prevent duplicate pages from being checked more than once
 def dup_checker(url):
-
-    # Remove scheme and fragments
-    url_dup = url.split('://')[1].split('#')[0]
+    url_dup = url.split('://')[1].split('#')[0]  # Remove scheme and fragments
 
     # Remove www subdomains. This works with variants like www3. 
     if url_dup.startswith('www'): url_dup = url_dup.split('.', maxsplit=1)[1]
@@ -312,7 +478,7 @@ def proceed(url) -> bool:
                 #time.sleep(crawl_delay - time_elapsed)
 
     # Exclude if domain occurrence limit is exceeded
-    if domain_o.domain_count > domain_limit:
+    if domain_o.domain_count > DOMAIN_LIMIT:
         logger.info(f'Domain limit exceeded: {url_dup} {domain_o.domain_count}')
         checked_urls_d_entry(url_dup, 'Domain limit exceeded')
         return False
@@ -328,12 +494,20 @@ def proceed(url) -> bool:
     return True
 
 
+# Wait until ping succeeds
+async def check_internet_connection():
+    while pw_pause:
+        logger.warning(f'pw_pause invoked')
+        await asyncio.sleep(4)
+
+
 # Get working list from queue
 async def get_working_o(task_id):
     try:
         async with q_lock:
             working_o = all_urls_q.get_nowait()
             all_done_d[task_id] = False
+        logger.debug(f'got new working_list {working_o}')
         return working_o
 
     # Empty queue
@@ -348,21 +522,21 @@ async def get_working_o(task_id):
 
 
 # Choose requester based on attempt number
-async def choose_requester(working_o, task_id, pw, session):
+def choose_requester(working_o, task_id, pw, session):
     working_o.req_attempt_num += 1
     try:
         if working_o.req_attempt_num < 3:
-            await pw_req(working_o, task_id, pw)
+            return pw_req(pw, working_o)
 
         elif working_o.req_attempt_num < 5:
-            await asyncio.wait_for(static_req(working_o, task_id, session), timeout=30)
+            return static_req(session, working_o)
 
         else:
             logger.info(f'All retries exhausted: {working_o.workingurl} {working_o.req_attempt_num}')
             working_c.prog_count += 1
 
-    except asyncio.TimeoutError as errex:
-        logger.warning(f'looper timeout __error: {errex} {working_o}')
+    except asyncio.TimeoutError as errex:  ## not possible without wait for?
+        logger.warning(f'looper timeout __error: {errex} {working_o.workingurl}')
         add_errorurls(working_o, 'jj_error 8', 'looper timeout', True)
 
     except Exception as errex:
@@ -370,39 +544,44 @@ async def choose_requester(working_o, task_id, pw, session):
         add_errorurls(working_o, 'jj_error 9', errex, True)
             
 
-# Decide which requester to use based on number of attmepts for that URL
+# Request loop
 async def looper(pw, session):
     task_id = asyncio.current_task().get_name()
 
     # End looper if all tasks report empty queue
     while not all(all_done_d.values()):
+        await check_internet_connection()
 
-        # Check internet connectivity
-        while pw_pause:
-            logger.warning(f'pw_pause invoked')
-            await asyncio.sleep(4)
-
-        # Get working list from queue
+        # Get url from queue
         working_o = await get_working_o(task_id)
         if not working_o: continue
-        logger.debug(f'got new working_list {working_o}')
 
-        # Make request
-        await choose_requester(working_o, task_id, pw, session)
+        # Get requester
+        req_o = choose_requester(working_o, task_id, pw, session)
+        if not req_o: continue
 
-        # Success
-        if hasattr(working_o, 'html'):
-            req_success(working_o)
+        try:
+            await req_o.request_url()
 
-        #else: handle errors from both requesters here?
+            if req_o.resp.status == 200:
+                if not req_o.content_type_check(working_o): continue
+                await req_o.get_content()
+                if not req_o.check_vis_text(working_o): continue
+                req_o.add_html(working_o)
+                req_success(working_o)
+            else:
+                req_o.resp_err_handler(working_o)
 
-    # All tasks complete
-    logger.info(f'Task complete:')
+        except Exception as errex:
+            req_o.failed_req_handler(working_o, errex)
+        finally:
+            await req_o.close()
+
+    logger.info(f'Task complete:')  # All tasks complete
 
 
 # After successful webpage retrieval
 def req_success(working_o):
-    logger.debug(f'has html: {working_o.workingurl}')
     working_c.prog_count += 1
     
     logger.debug(f'begin domain_o.update {working_o} {domain_c.domain_d[working_o.dup_domain]}')
@@ -416,183 +595,10 @@ def req_success(working_o):
 
     logger.debug(f'begin check_red {working_o}')
     if not working_o.check_red():  # Check if redirect URL has been processed already
-        logger.info(f'check_red fail {working_o}')
-        return
-
-    logger.debug(f'begin check_vis_text {working_o}')
-    if not working_o.check_vis_text():  # Check for minimum content/soft 404
         return
 
     working_o.write_results()  # Write result text to file
     crawler(working_o)  # Get more links from page
-
-
-# Select pw browser, create context and page
-async def get_pw_brow(pw):
-    for brow in brow_l:
-        try:
-            context = await brow.new_context(ignore_https_errors=True)  ## slow execution here?
-            logger.debug(f'here3')
-            context.set_default_timeout(20000)
-            page = await context.new_page()
-            logger.debug(f'using brow: {brow._impl_obj._browser_type.name}')
-            return context, page
-
-        # Remove browser from available list on error
-        except Exception:
-            logger.exception(f'error creating context or page')
-            await clear_brows(pw, brow)
-
-    # No browser available
-    else:
-        logger.warning(f'brow list empty')
-        await asyncio.sleep(4)
-
-
-# Playwright requester
-#@timeout_decorator.timeout(20)
-async def pw_req(working_o, task_id, pw):
-    workingurl = working_o.workingurl
-    context, page = await get_pw_brow(pw)
-
-    try:
-        logger.debug(f'start pw req: {workingurl}')
-        resp = await page.goto(workingurl)  # Request
-        await page.wait_for_load_state('networkidle')
-        logger.debug(f'end pw req: {workingurl}')
-        logger.debug(f'req timer: {resp.request.timing["responseEnd"]}')
-
-        if soft_404_check(working_o, resp, 'a'): return
-
-        # Success. Get content
-        if resp.status == 200:
-            logger.info(f'pw req success {workingurl}')
-            red_url = resp.url
-            html, vis_text = await get_page_content(workingurl, page)
-            working_o.add_html(html, vis_text, red_url, f'pw_browser')
-        else:
-            resp_err_handler(workingurl, page, resp, resp.status_text, 'a')
-
-    except Exception as errex:
-        failed_req_handler(working_o, errex, 'a')
-
-    finally:
-        try:
-            await context.close()
-        except Exception:
-            logger.exception(f'cant close pw context')
-
-
-# Content from main and child frames
-async def get_page_content(workingurl, page):
-    logger.debug(f'begin frame loop: {workingurl} {len(page.frames)}')
-
-    # Main frame content
-    try:
-        ret_t = await asyncio.wait_for(get_iframes_content(page.main_frame), timeout=3)
-        html = f'\n{ret_t[0]}'
-        vis_text = f'\n{ret_t[1]}'
-        logger.debug(f'end frame loop: {workingurl}')
-
-    # Fallback to html without child frame content
-    except Exception as errex:
-        logger.warning(f'child frame error: {errex} {workingurl}')
-        html = await page.content()
-        vis_text = await page.inner_text('body')
-
-    return html, vis_text
-
-
-# Recursive child frame explorer
-async def get_iframes_content(frame):
-    try:
-
-        # Discard useless frames
-        if frame.name == "about:srcdoc" or frame.name == "about:blank" or not frame.url or frame.url == "about:srcdoc" or frame.url == "about:blank" or frame.is_detached():
-            return "", ""
-
-        # Current frame content
-        html = await frame.content()
-        vis_text = await frame.inner_text('body')
-
-        # Append recursive child frame content
-        logger.debug(f'num child frames: {len(frame.child_frames)} {frame}')
-        for child_frame in frame.child_frames:
-            ret_t = await get_iframes_content(child_frame)
-            html += f'\n{ret_t[0]}'
-            vis_text += f'\n{ret_t[1]}'
-            #logger.debug(f'child frame appended: {frame.url}')
-
-        return html, vis_text
-
-    except Exception as errex:
-        logger.warning(f'get_iframes_content_f __error: {errex}')
-        return "", ""
-
-
-# Forbidden content types. only works with firefox
-def soft_404_check(working_o, resp, ec_char):
-    content_type = resp.headers['content-type']
-
-    if 'application/pdf' in content_type:
-        logger.info(f'jj_error 2{ec_char}: Forbidden content type: {working_o.workingurl}')
-        add_errorurls(working_o, 'jj_error 2{ec_char}', 'Forbidden content type', False)
-        return True
-    elif 'text/html' not in content_type:
-        logger.warning(f'Unknown forbidden content type: {content_type} {working_o.workingurl}')
-
-
-# Act on response status number
-def resp_err_handler(working_o, page, resp, stat_text, ec_char):
-
-    # Don't retry req
-    if resp.status == 404 or resp.status == 403:
-        logger.warning(f'jj_error 4{ec_char}: {working_o.workingurl} {stat_text}')
-        add_errorurls(working_o, 'jj_error 4{ec_char}', stat_text, False)
-
-    # Retry req
-    else:
-        logger.warning(f'jj_error 5{ec_char}: request error: {working_o.workingurl} {stat_text}')
-        add_errorurls(working_o, 'jj_error 5{ec_char}', stat_text, True)
-        if resp.status == 429:  ## unn?
-            logger.warning(f'__error 429 {working_o.workingurl}')
-
-
-# Errors not from status code
-def failed_req_handler(working_o, errex, ec_char):
-    if isinstance(errex, asyncio.TimeoutError):
-        logger.warning(f'jj_error 3{ec_char}: Timeout {working_o.workingurl}')
-        add_errorurls(working_o, 'jj_error 3{ec_char}', 'Timeout', True)
-
-    else:
-        logger.warning(f'jj_error 6{ec_char}: playwright error: {working_o.workingurl} {sys.exc_info()[2].tb_lineno}')
-        add_errorurls(working_o, 'jj_error 6{ec_char}', str(errex), True)
-
-
-# Static requester
-async def static_req(working_o, task_id, session):
-    workingurl = working_o.workingurl
-    print('task_id=', task_id)
-    logger.debug(f'task_id= {task_id}')
-    logger.debug(f'start static req: {workingurl}')
-
-    try:
-        async with session.get(workingurl, headers={'User-Agent': user_agent_s}, ssl=False) as resp:  # Req
-            logger.debug(f'end static req: {workingurl}')
-            if soft_404_check(working_o, resp, 'b'): return  # Must detect forbidden content types before getting html
-
-            # Success
-            if resp.status == 200:
-                logger.info(f'Static req success: {workingurl}')
-                html = await resp.text()
-                vis_text = vis_soup_f(html)  # Get vis soup
-                working_o.add_html(html, vis_text, red_url, 'static_browser')
-            else:
-                resp_err_handler(workingurl, page, resp, resp.reason, 'b')
-
-    except Exception as errex:
-        failed_req_handler(working_o, errex, 'b')
-
 
 
 
@@ -637,51 +643,30 @@ def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
 
 # Mark final errors in errorlog
 def final_error(working_o):
-    org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
     try:
         working_c.prog_count += 1
         #with err_lock:
-        error_urls_d[workingurl].append(['jj_final_error'])
-
-        # If request failed on first URL (portal), use homepage as fallback
-        if current_crawl_level == 0:
-            logger.info(f'Using URL fallback: {parent_url}')
-
-            # Put homepage url into queue with -1 current crawl level
-            if proceed(parent_url):
-                working_o.workingurl = parent_url
-                working_o.current_crawl_level = -1
-                working_o.parent_url = workingurl  ## parent of homepage fallback?
-                working_o.workingurl_dup = dup_checker(parent_url)
-                working_o.add_to_queue()
-
+        error_urls_d[working_o.workingurl].append(['jj_final_error'])
+        homepage_fallback(working_o)
     except Exception:
-        logger.exception(f'final_e __error: {workingurl} {sys.exc_info()[2].tb_lineno}')
+        logger.exception(f'final_e __error: {working_o.workingurl} {sys.exc_info()[2].tb_lineno}')
 
 
-# Separate the visible text from HTML
-def get_vis_soup(html):
+# If request failed on first URL (portal), use homepage as fallback
+def homepage_fallback(working_o):
+    org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
 
-    vis_soup = BeautifulSoup(html, 'html5lib').find('body')  # Select body
+    if current_crawl_level == 0:
+        logger.info(f'Using URL fallback: {parent_url}')
 
-    # Remove script, style, and empty elements
-    for x in vis_soup(["script", "style"]):
-        x.decompose()
-
-    ## unn
-    # Remove all of the hidden style attributes
-    for x in vis_soup.find_all('', {"style" : style_reg}):
-        x.decompose()
-
-    # Type="hidden" attribute
-    for x in vis_soup.find_all('', {"type" : 'hidden'}):
-        x.decompose()
-
-    # Hidden section(s) and dropdown classes
-    for x in vis_soup(class_=class_reg):
-        x.decompose()
-
-    return vis_soup.text
+        # Put homepage url into queue with -1 current crawl level
+        if proceed(parent_url):
+            working_c.prog_count -= 1  ## undo progress count from final error
+            working_o.workingurl = parent_url
+            working_o.current_crawl_level = -1
+            working_o.parent_url = workingurl  ## parent of homepage fallback?
+            working_o.workingurl_dup = dup_checker(parent_url)
+            working_o.add_to_queue()
 
 
 
@@ -711,10 +696,9 @@ def get_pagination(working_o):
 
 
 # Find more links
-def get_links(soup, jbws_high_conf, workingurl, domain):
-        
-    fin_urls = set()
-    for anchor_tag in soup.find_all('a'):
+def get_links(working_o):    
+    new_urls = set()
+    for anchor_tag in working_o.soup.find_all('a'):
 
         # Widen search of jbws if only 1 url in elem. should this be recursive? ie grandparent
         if len(anchor_tag.parent.find_all('a')) == 1:
@@ -727,14 +711,14 @@ def get_links(soup, jbws_high_conf, workingurl, domain):
             br.replace_with(" ")
 
         # Skip if the tag contains a bunkword
-        if any(bunkword in str(tag).lower() for bunkword in bunkwords):
-            logger.debug(f'Bunk word detected: {workingurl} {str(tag)[:99]}')
+        if any(bunkword in str(tag).lower() for bunkword in BUNKWORDS):
+            #logger.debug(f'Bunk word detected: {working_o.workingurl} {str(tag)[:99]}')
             continue
 
         # Skip if no jobwords in content
         ## use this for only high conf jbws
         tag_content = str(tag.text).lower()
-        if not any(jbw in tag_content for jbw in jbws_high_conf):
+        if not any(jbw in tag_content for jbw in working_o.jbws_high_conf):
             #logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
             continue
 
@@ -754,15 +738,16 @@ def get_links(soup, jbws_high_conf, workingurl, domain):
         '''
 
         bs_url = anchor_tag.get('href')
-        abspath = parse.urljoin(domain, bs_url).strip()  # Convert relative paths to absolute and strip whitespace
+        abspath = parse.urljoin(working_o.domain, bs_url).strip()  # Convert relative paths to absolute and strip whitespace
         logger.debug(f'abspath: {abspath} {tag_content}')
         # Remove non printed characters
         #abspath = abspath.encode('ascii', 'ignore').decode()
         #abspath = parse.quote(abspath)
 
-        fin_urls.add(abspath)
+        new_urls.add(abspath)
 
-    return fin_urls
+    logger.info(f'Found {len(new_urls)} new links from {working_o.workingurl}')
+    return new_urls
 
 
 # Explore html to find more links and weigh confidence
@@ -778,18 +763,14 @@ def crawler(working_o):
         get_pagination(working_o)
 
         # Limit crawl level
-        if current_crawl_level > max_crawl_depth:
+        if current_crawl_level > MAX_CRAWL_DEPTH:
             return
 
         logger.debug(f'Begin crawling: {workingurl}')
         working_o.current_crawl_level += 1
 
-        # List of urls to add to queue
-        fin_urls = get_links(working_o.soup, working_o.jbws_high_conf, workingurl, working_o.domain)
-
         # Check new URLs and append to queue
-        logger.debug(f'links from {workingurl} {fin_urls}')
-        for abspath in fin_urls:
+        for abspath in get_links(working_o):
             if proceed(abspath):
                 #new_working_o = working_c(org_name, abspath, current_crawl_level, workingurl, db_name, dup_checker(abspath), req_attempt_num)
                 working_o.workingurl = abspath
@@ -864,15 +845,16 @@ async def clear_brows(pw, *args):
 
 # Start primary and fallback pw browsers
 async def init_pw_brows(pw):
-    pw_browser = await pw.chromium.launch(args=['--disable-gpu'])
-    brow_l.append(pw_browser)
+    brow = await pw.chromium.launch(args=['--disable-gpu'])
+    brow_l.append(brow)
 
-    pw_browser = await pw.firefox.launch()
-    brow_l.append(pw_browser)
+    brow = await pw.firefox.launch()
+    brow_l.append(brow)
         
 
 # Check internet connectivity
 async def ping_begin():
+    global pw_pause
     ping_tally = 0
     while True:
         try:
@@ -907,6 +889,7 @@ async def ping_begin():
         ## restart pw not nic if bash succeeds but pw fails
         # Restart network interface on any two errors
         if ping_tally > 1 or bash_ping_ret != 0:
+            logger.debug(f'check these {ping_tally} {bash_ping_ret}')
             pw_pause = True
             await restart_nic()
 
@@ -966,18 +949,16 @@ async def restart_nic():
 
 
 # Write shared objects to file to save progress
-logger.debug(f'rec1 {sys.getrecursionlimit()}')
-#sys.setrecursionlimit(50000)  # why did pickle.dump() start giving "maximum recursion depth exceeded while calling a Python object" ?
 async def save_progress():
     logger.debug(f'begin prog save')
     try:
         # Pickle queue of working_os
         async with q_lock:
-            with open(queue_path, "wb") as f:
+            with open(QUEUE_PATH, "wb") as f:
                 pickle.dump(all_urls_q, f)
 
         # CML, errorlog, and multiorg
-        for each_path, each_dict in (checked_path, checked_urls_d), (error_path, error_urls_d), (multi_org_d_path, multi_org_d):
+        for each_path, each_dict in (CHECKED_PATH, checked_urls_d), (ERROR_PATH, error_urls_d), (MULTI_ORG_D_PATH, multi_org_d):
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
     except Exception:
@@ -1007,7 +988,7 @@ def display_prog():
 
 # Start scraper
 async def init_async_tasks(pw, session):
-    for i in range(semaphore):
+    for i in range(SEMAPHORE):
         task = asyncio.create_task(looper(pw, session))
         all_done_d[task.get_name()] = False
 
@@ -1038,40 +1019,22 @@ async def main():
                 logger.exception(f'\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
                 await asyncio.sleep(2)
 
+
         # Scrape complete. Close browsers
         logger.info(f'  Scrape complete  '.center(70, '='))
-        await shutdown_scraper(session)
+        await cleanup()
 
 
-# Close browsers
-async def shutdown_scraper(session):
+async def cleanup():
     try:
-        for i in brow_l:
-            await i.close()
-        await session.close()
+        for brow in brow_l:
+            await brow.close()
     except Exception:
-        logger.exception(f'Browser close error')
+        logger.exception(f'\ncant close pw brow')
 
 
 
 
-
-
-
-
-
-
-
-# Dir for error 7 files
-err7_path = os.path.join(dater_path, 'jj_error_7')
-if not os.path.exists(err7_path):
-    os.makedirs(err7_path)
-
-# Scraper options
-max_crawl_depth = 1  # Webpage recursion depth
-semaphore = 12  # Num of concurrent tasks
-empty_cutoff = 200  # Num of characters in webpage text file to be considered empty
-domain_limit = 20  # Max num of pages per domain
 
 # Locks
 q_lock = asyncio.Lock()
@@ -1086,46 +1049,9 @@ restart_brow_set = set()
 
 #jbw_tally_ml = [] # Used to determine the frequency that jbws are used (debugging)
 
-# Set paths to files
-queue_path = os.path.join(dater_path, 'queue')
-checked_path = os.path.join(dater_path, 'checked_pages')
-error_path = os.path.join(dater_path, 'errorlog')
-multi_org_d_path = os.path.join(dater_path, 'multi_org_d')
-rp_path = os.path.join(persistent_path, 'rp_file')
-auto_bl_path = os.path.join(persistent_path, 'auto_blacklist')
-
 
 pw_pause = False  # Tell all tasks to wait if there is no internet connectivity
 all_done_d = {}  # Each task states if the queue is empty
-
-
-user_agent_s = 'Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0'
-
-# Compile regex paterns for reducing whitespace in written files
-white_reg = re.compile("\s{2,}")
-
-# Compile regex paterns for removing hidden HTML elements
-style_reg = re.compile("(display\s*:\s*(none|block);?|visibility\s*:\s*hidden;?)")
-class_reg = re.compile('(hidden-sections?|dropdown|has-dropdown|sw-channel-dropdown|dropdown-toggle)')
-
-## application
-# Exclude links that contain any of these. percent encodings must be lower case
-bunkwords = ('academics', '5il.co', '5il%2eco', 'pnwboces.org', 'recruitfront.com', 'schoolapp.wnyric.org', 'professional development', 'career development', 'javascript:', '.pdf', '.jpg', '.ico', '.rtf', '.doc', '.mp4', '%2epdf', '%2ejpg', '%2eico', '%2ertf', '%2edoc', '%2emp4', 'mailto:', 'tel:', 'icon', 'description', 'specs', 'specification', 'guide', 'faq', 'images', 'exam scores', 'resume-sample', 'resume sample', 'directory', 'pupil personnel')
-
-# Include links that include any of these
-# Set high and low confidence jbw lists
-jbws_all_high = ('continuous recruitment', 'employment', 'job listing', 'job opening', 'job posting', 'job announcement', 'job opportunities', 'job vacancies', 'jobs available', 'available positions', 'open positions', 'available employment', 'career opportunities', 'employment opportunities', 'current vacancies', 'current job', 'current employment', 'current opening', 'current posting', 'current opportunities', 'careers at', 'jobs at', 'jobs @', 'work at', 'employment at', 'find your career', 'browse jobs', 'search jobs', 'vacancy postings', 'vacancy list', 'prospective employees', 'help wanted', 'work with', 'immediate opportunities', 'promotional announcements')
-jbws_all_low = ('join', 'job', 'job seeker', 'job title', 'positions', 'careers', 'human resource', 'personnel', 'vacancies', 'vacancy', 'posting', 'opening', 'recruitment')
-
-jbws_civ_high = ['upcoming exam', 'exam announcement', 'examination announcement', 'examinations list', 'civil service opportunities', 'civil service exam', 'civil service test', 'current civil service', 'open competitive', 'open-competitive']
-jbws_civ_high += jbws_all_high
-
-jbws_civ_low = ['open to', 'civil service', 'exam', 'examination', 'test', 'current exam']
-jbws_civ_low += jbws_all_low
-
-jbws_su_high = jbws_all_high
-jbws_su_low = jbws_all_low
-jbws_su_x_low = ('faculty', 'staff', 'adjunct', 'academic', 'support', 'instructional', 'administrative', 'professional', 'classified', 'coaching')
 
 
 
@@ -1162,12 +1088,11 @@ class domain_c:
 
     # After req
     def update(self):
-        logger.debug(f"update start")
+        #logger.debug(f"update start")
         #with domain_lock:
         self.last_req_ts = datetime.now().timestamp()
-        logger.debug(f"update 1111")
         self.domain_count += 1
-        logger.debug(f"update complete")
+        #logger.debug(f"update complete")
 
 
 
@@ -1181,7 +1106,7 @@ today_dt = date.today()
 
 # Open existing blacklist
 try:
-    with open(auto_bl_path, "r") as f:
+    with open(AUTO_BL_PATH, "r") as f:
         auto_blacklist_d = json.load(f)
 
     # Check if entry is more than N days old
@@ -1207,7 +1132,7 @@ except Exception:
 
 # Read rp file
 try:
-    with open(rp_path, 'rb') as rp_file:
+    with open(RP_PATH, 'rb') as rp_file:
         rp_d = pickle.load(rp_file)
 
     # Get time robots.txt was fetched
@@ -1231,21 +1156,21 @@ except Exception:
 try:
 
     # Read pickle queue of class objs
-    with open(queue_path, "rb") as f:
+    with open(QUEUE_PATH, "rb") as f:
         all_urls_q = pickle.load(f)
 
     # Read errorlog file as dict
-    with open(error_path, "r") as f:
+    with open(ERROR_PATH, "r") as f:
         error_urls_d = json.load(f)
     logger.info(f'errorlog recovery complete')
 
     # Read CML file as dict
-    with open(checked_path, "r") as f:
+    with open(CHECKED_PATH, "r") as f:
         checked_urls_d = json.load(f)
     logger.info(f'CML recovery complete')
 
     # Read multi_org_d file as dict
-    with open(multi_org_d_path, "r") as f:
+    with open(MULTI_ORG_D_PATH, "r") as f:
         multi_org_d = json.load(f)
     logger.info(f'multi_org_d recovery complete')
 
@@ -1318,7 +1243,7 @@ except Exception as errex:
 
 
 # Write RP to file
-with open(rp_path, 'wb') as rp_file:
+with open(RP_PATH, 'wb') as rp_file:
     pickle.dump(domain_c.domain_d, rp_file)
 
 
@@ -1337,16 +1262,16 @@ asyncio.run(main(), debug=False)
 
 '''
 # jbw tally
-for i in jbws_civ_low:
+for i in JBWS_CIV_LOW:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
-for i in jbws_su_low:
+for i in JBWS_SU_LOW:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
-for i in jbws_civ_high:
+for i in JBWS_CIV_HIGH:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
-for i in jbws_su_high:
+for i in JBWS_SU_HIGH:
     r_count = jbw_tally_ml.count(i)
     logger.info(f'{i} = {r_count}')
 '''
@@ -1359,7 +1284,7 @@ cml_text = '{\n'
 for k, v in checked_urls_d.items(): cml_text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n' # json uses double quotes
 cml_text = cml_text[:-3] # Delete trailing newlines and comma
 cml_text += '\n}'
-with open(checked_path, 'w', encoding='utf8') as checked_file:
+with open(CHECKED_PATH, 'w', encoding='utf8') as checked_file:
     checked_file.write(cml_text)
 
 # Write errorlog
@@ -1368,7 +1293,7 @@ e_text = '{\n'
 for k, v in error_urls_d.items(): e_text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n'
 e_text = e_text[:-3]
 e_text += '\n}'
-with open(error_path, 'w', encoding='utf8') as error_file:
+with open(ERROR_PATH, 'w', encoding='utf8') as error_file:
     error_file.write(e_text)
 
 
@@ -1377,17 +1302,17 @@ with open(error_path, 'w', encoding='utf8') as error_file:
 duration = datetime.now() - startTime
 logger.info(f'\n\nPages checked = {len(checked_urls_d)}')
 logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
-logger.info(f'Pages/sec/tasks = {str((len(checked_urls_d) / duration.seconds) / semaphore)[:4]} \n')
+logger.info(f'Pages/sec/tasks = {str((len(checked_urls_d) / duration.seconds) / SEMAPHORE)[:4]} \n')
 
 
 '''
 ##
 # Delete queue.txt to indicate program completed successfully
 try:
-    os.remove(queue_path)
-    logger.info(f'\nDeleted queue_path file\n')
+    os.remove(QUEUE_PATH)
+    logger.info(f'\nDeleted QUEUE_PATH file\n')
 except:
-    logger.info(f'\nFailed to delete queue_path file\n')
+    logger.info(f'\nFailed to delete QUEUE_PATH file\n')
 '''
 
 
@@ -1407,7 +1332,7 @@ for db_type, url_d in multi_org_d.items():
         # URL is used by more than one org
         if len(org_names_l) > 1:
 
-            src_path = os.path.join(results_path, db_type, org_names_l[0])  # Path to results of first org in list
+            src_path = os.path.join(RESULTS_PATH, db_type, org_names_l[0])  # Path to results of first org in list
 
             # Check if results exists for first org
             if os.path.isdir(src_path):
@@ -1415,7 +1340,7 @@ for db_type, url_d in multi_org_d.items():
 
                 # Copy results from first org to all remaining orgs
                 for dst_path in org_names_l[1:]:
-                    dst_path = os.path.join(results_path, db_type, dst_path)
+                    dst_path = os.path.join(RESULTS_PATH, db_type, dst_path)
                     logger.debug(f'to:      {dst_path}')
                     try: shutil.copytree(src_path, dst_path)
                     except Exception: logger.exception(f'multiorg copy error')
@@ -1432,7 +1357,7 @@ logger.info(f'Multi org files: {file_count}')
 
 
 # Fallback to older results if newer results are missing
-dater_d = glob.glob(jorb_home + "/*")  # List all date dirs
+dater_d = glob.glob(JORB_HOME_PATH + "/*")  # List all date dirs
 dater_d.sort(reverse=True)
 if len(dater_d) > 1:  # Skip if there are no old results
     logger.info(f'\nFalling back to old results: {dater_d[1]}')
@@ -1440,12 +1365,12 @@ if len(dater_d) > 1:  # Skip if there are no old results
     count = 0
 
     # Loop through each results dir
-    for each_db in db_types:
+    for each_db in DB_TYPES:
 
         # Select old and current db dirs
-        cur_db_dir = os.path.join(results_path, each_db)
+        cur_db_dir = os.path.join(RESULTS_PATH, each_db)
         old_db_dir = os.path.join(old_dater_results_dir, each_db)
-        inc_old_dir = os.path.join(results_path, 'include_old', each_db)
+        inc_old_dir = os.path.join(RESULTS_PATH, 'include_old', each_db)
 
         # Loop through each org name dir in the old db type dir
         for old_org_name_path in glob.glob(old_db_dir + '/*'):
@@ -1492,7 +1417,7 @@ for url in err_parse.rec_errs_l:
     auto_blacklist_d[url_dup] = today_dt.isoformat()
 
 # Write file
-with open(auto_bl_path, "w") as f:
+with open(AUTO_BL_PATH, "w") as f:
     json.dump(auto_blacklist_d, f, indent=2)
 
 
