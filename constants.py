@@ -29,7 +29,7 @@ MAX_CRAWL_DEPTH = 1  # Webpage recursion depth
 SEMAPHORE = 12  # Num of concurrent tasks
 EMPTY_CUTOFF = 200  # Num of characters in webpage text file to be considered empty
 DOMAIN_LIMIT = 20  # Max num of pages per domain
-RP_EXPIRATION_DAYS = 90
+RP_EXPIRATION_DAYS = 180
 USER_AGENT_S = 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0'  ## used for only static req?
 
 
