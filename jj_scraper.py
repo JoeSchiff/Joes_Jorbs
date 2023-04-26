@@ -22,39 +22,38 @@ import timeout_decorator
 import traceback
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, date
-from math import sin, cos, sqrt, atan2, radians
 from playwright.async_api import async_playwright, TimeoutError
 from urllib import parse, robotparser
+from constants import *
 
 
 
 
 startTime = datetime.now()
 
-from constants import *
-
 
 
 # Dirs for results
-for db in DB_TYPES:
-    db_path = os.path.join(RESULTS_PATH, db)
-    if not os.path.exists(db_path):
-        os.makedirs(db_path)
+def make_dirs():
+    for db in DB_TYPES:
+        db_path = os.path.join(RESULTS_PATH, db)
+        if not os.path.exists(db_path):
+            os.makedirs(db_path)
 
-# Dir for rp and autoblacklist files
-if not os.path.exists(PERSISTENT_PATH):
-    os.makedirs(PERSISTENT_PATH)
+    # Dir for rp and autoblacklist files
+    if not os.path.exists(PERSISTENT_PATH):
+        os.makedirs(PERSISTENT_PATH)
 
-# Dir for error 7 files
-if not os.path.exists(ERR7_PATH):
-    os.makedirs(ERR7_PATH)
+    # Dir for error 7 files
+    if not os.path.exists(ERR7_PATH):
+        os.makedirs(ERR7_PATH)
 
 
 # Append asyncio task id if available to log
 class context_filter(logging.Filter):
     def filter(self, record):
         try:
-            record.task_id = '- ' + asyncio.current_task().get_name()
+            record.task_id = f'- {asyncio.current_task().get_name()}'
         except:
             record.task_id = ''
         return True
@@ -217,7 +216,7 @@ class working_c:
 
 
 
-
+# URL requesting super class
 class requester_base:
     def __init__(self, working_o):
         self.url = working_o.workingurl
@@ -1037,28 +1036,8 @@ async def cleanup():
 
 
 
-# Locks
-q_lock = asyncio.Lock()
-brow_lock = asyncio.Lock()
-res_brow_lock = asyncio.Lock()
-err_lock = asyncio.Lock()
-check_lock = asyncio.Lock()
-
-# For managing and restarting PW browsers
-brow_l = []
-restart_brow_set = set()
-
-#jbw_tally_ml = [] # Used to determine the frequency that jbws are used (debugging)
-
-
-pw_pause = False  # Tell all tasks to wait if there is no internet connectivity
-all_done_d = {}  # Each task states if the queue is empty
-
-
-
 
 # robots.txt and domain tracker used for rate limiting
-domain_lock = asyncio.Lock()
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
 
@@ -1096,61 +1075,60 @@ class domain_c:
 
 
 
-## unn?
-# Omit these pages
-blacklist = ['cc.cnyric.org/districtpage.cfm?pageid=112', 'co.essex.ny.us/personnel', 'co.ontario.ny.us/94/human-resources', 'countyherkimer.digitaltowpath.org:10069/content/departments/view/9:field=services;/content/departmentservices/view/190', 'countyherkimer.digitaltowpath.org:10069/content/departments/view/9:field=services;/content/departmentservices/view/35', 'cs.monroecounty.gov/mccs/lists', 'herkimercounty.org/content/departments/view/9:field=services;/content/departmentservices/view/190', 'herkimercounty.org/content/departments/view/9:field=services;/content/departmentservices/view/35', 'jobs.albanyny.gov/default/jobs', 'monroecounty.gov/hr/lists', 'monroecounty.gov/mccs/lists', 'mycivilservice.rocklandgov.com/default/jobs', 'niagaracounty.com/employment/eligible-lists', 'ogdensburg.org/index.aspx?nid=345', 'penfield.org/multirss.php', 'tompkinscivilservice.org/civilservice/jobs', 'tompkinscivilservice.org/civilservice/jobs', 'swedishinstitute.edu/employment-at-swedish-institute', 'sunyacc.edu/job-listings']
-
-# Auto blacklist
-auto_blacklist_d = {}
-today_dt = date.today()
-
-# Open existing blacklist
-try:
-    with open(AUTO_BL_PATH, "r") as f:
-        auto_blacklist_d = json.load(f)
-
-    # Check if entry is more than N days old
-    rem_l = []
-    for k, v in auto_blacklist_d.items():
-        v_dt = date.fromisoformat(v)
-
-        # Combine with blacklist
-        if v_dt + timedelta(days=60) > today_dt:
-            blacklist.append(k)
-
-        # Remove expired entries
-        else:
-            logger.info(f'Removing expired auto blacklist entry: {k} {v}')
-            rem_l.append(k)
-
-    for i in rem_l:
-        del auto_blacklist_d[i]
-
-except Exception:
-    logger.exception(f'cant open blacklist:')
+# Combine auto blacklist from recurring errors and static blacklist
+def create_blacklists():
+    try:
+        with open(AUTO_BL_PATH, "r") as f:
+            auto_blacklist_d = json.load(f)
+    except Exception:
+        logger.exception(f'cant open blacklist file')
+        auto_blacklist_d = {}
+        
+    auto_blacklist_d = purge_auto_blacklist(auto_blacklist_d)
+    blacklist = STATIC_BLACKLIST + tuple(auto_blacklist_d)
+    return blacklist, auto_blacklist_d
 
 
-# Read rp file
-try:
-    with open(RP_PATH, 'rb') as rp_file:
-        rp_d = pickle.load(rp_file)
+# Remove expired entries
+def purge_auto_blacklist(auto_blacklist_d):
+    for url, bl_date_s in auto_blacklist_d.items():
+        bl_date_dt = date.fromisoformat(bl_date_s)
+        if bl_date_dt + timedelta(days=60) > date.today():
+            rem_l.append(url)
+
+    # Remove after iteration
+    for url in rem_l:
+        logger.info(f'Removing expired auto blacklist entry: {url} {bl_date_s}')
+        del auto_blacklist_d[url]
+
+    return auto_blacklist_d
+
+
+# Reuse old robots.txts
+def read_rp_file():
+    try:
+        with open(RP_PATH, 'rb') as rp_file:
+            rp_d = pickle.load(rp_file)
+    except Exception:
+        logger.exception(f'RP file read failed:')
+        domain_c.domain_d = {}
 
     # Get time robots.txt was fetched
     for i in rp_d.values():
         ts = i.rp.mtime()
         if ts: break
     else:
-        logger.error('Error: cant recover timestamp')
+        logger.error('Error: cant recover any rp timestamp')
+        return
 
-    logger.info(f'rp_file recovery complete')
-    if datetime.now() - datetime.fromtimestamp(ts) > timedelta(days=90):
+    if datetime.now() - datetime.fromtimestamp(ts) > timedelta(days=RP_EXPIRATION_DAYS):
         logger.warning(f'rp_file outdated: {datetime.fromtimestamp(ts).isoformat()}')
     else:
-        domain_c.domain_d = rp_d
         logger.info(f'rp_file still valid: {datetime.fromtimestamp(ts).isoformat()}')
-except Exception:
-    logger.exception(f'RP file read failed:')
+        domain_c.domain_d = rp_d
+        
 
+        
 
 # Resume scraping using leftover results from the previously failed scraping attempt
 try:
@@ -1243,8 +1221,10 @@ except Exception as errex:
 
 
 # Write RP to file
-with open(RP_PATH, 'wb') as rp_file:
-    pickle.dump(domain_c.domain_d, rp_file)
+def write_rp_file():
+    with open(RP_PATH, 'wb') as rp_file:
+        pickle.dump(domain_c.domain_d, rp_file)
+    logger.info(f'RP file written')
 
 
 
@@ -1364,10 +1344,10 @@ def fallback_old_copy():
 
 
 # Get recurring error URLs and add them to existing dict
-def auto_blacklist_update():
+def auto_blacklist_update(auto_blacklist_d):
     for url in err_parse.rec_errs_l:
         url_dup = dup_checker(url)
-        auto_blacklist_d[url_dup] = today_dt.isoformat()
+        auto_blacklist_d[url_dup] = date.today().isoformat()
 
     with open(AUTO_BL_PATH, "w") as f:
         json.dump(auto_blacklist_d, f, indent=2)
@@ -1381,7 +1361,29 @@ def send_to_server():
 
 
 
+make_dirs()
 
+# Locks
+q_lock = asyncio.Lock()
+brow_lock = asyncio.Lock()
+res_brow_lock = asyncio.Lock()
+err_lock = asyncio.Lock()
+check_lock = asyncio.Lock()
+domain_lock = asyncio.Lock()
+
+# For managing and restarting PW browsers
+brow_l = []
+restart_brow_set = set()
+
+#jbw_tally_ml = [] # Used to determine the frequency that jbws are used (debugging)
+
+
+pw_pause = False  # Tell all tasks to wait if there is no internet connectivity
+all_done_d = {}  # Each task states if the queue is empty
+
+blacklist, auto_blacklist_d = create_blacklists()
+read_rp_file()
+    
 # Start async event loop
 asyncio.run(main(), debug=False)
 
@@ -1393,11 +1395,11 @@ fallback_old_copy()
 send_to_server()
 
 import err_parse
-auto_blacklist_update()
+auto_blacklist_update(auto_blacklist_d)
 make_human_readable(checked_urls_d, CHECKED_PATH)
 make_human_readable(error_urls_d, ERROR_PATH)
 
-
+write_rp_file()  ## call this after scraper or immediatly after rp gets updated?
 
 
 
