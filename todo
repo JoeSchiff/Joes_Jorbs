@@ -55,6 +55,9 @@ handle timeouts uniformly +
   child frames
 
 respect robots.txt
+  does rp file have multiple dates? so how determine exiration?
+    when are new entries created?
+        which domains are scraped never change therfore only dates change? or new entries are made as scraper runs?
   store rp files or make async
   after success req: update timestamp and domain count +
     after any req? not just success?
