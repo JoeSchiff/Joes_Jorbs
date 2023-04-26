@@ -70,9 +70,11 @@ respect robots.txt
     why class? use attributes not dict +
     use self in methods +
 
-auto blacklist +
+auto blacklist
+    static bl is unn
     blacklist is dup urls +
     must be exact match, not domain. ex: 5il.co != 5il.co/page3
+    
 domain-wide jbw conf. Once high conf is established, ignore low conf links for that domain
 auto update dbs urls by sorting jbw conf from scraper
   this wont get new orgs, only new em urls
@@ -150,7 +152,6 @@ decompose nav tags?
 content of script tags not decomposing because Splash evaluates scripts. So there is no script tag header or footer for BS to read: https://recruiting.ultipro.com/BRY1002BSC/JobBoard/6b838b9a-cd2b-436a-903b-0de7b6e17b4f/?q=&o=postedDateDesc
 max crawl depth 3? either high or low conf jbws in tags? -
 remove non printable characters from result text? -
-phase out blacklist
 weighted jbws
 upgrade server to 22.04
 charter schools http://www.p12.nysed.gov/psc/csdirectory/CSLaunchPage.html
