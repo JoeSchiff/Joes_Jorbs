@@ -1020,11 +1020,12 @@ async def main():
                 await asyncio.sleep(2)
 
 
-        # Scrape complete. Close browsers
+        # Scrape complete
         logger.info(f'  Scrape complete  '.center(70, '='))
         await cleanup()
 
 
+# Close pw browsers
 async def cleanup():
     try:
         for brow in brow_l:
@@ -1084,7 +1085,6 @@ class domain_c:
 
         # Store rp so it is requested only once
         domain_c.domain_d[dup_domain] = self
-
 
     # After req
     def update(self):
@@ -1248,18 +1248,6 @@ with open(RP_PATH, 'wb') as rp_file:
 
 
 
-
-
-
-
-# Start async event loop
-asyncio.run(main(), debug=False)
-
-
-
-
-
-
 '''
 # jbw tally
 for i in JBWS_CIV_LOW:
@@ -1278,147 +1266,154 @@ for i in JBWS_SU_HIGH:
 
 
 
-# Convert CML and errorlog to nice format that can be read by humans and json
-## this prevents resumption because json converts None to null: NameError: name 'null' is not defined
-cml_text = '{\n'
-for k, v in checked_urls_d.items(): cml_text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n' # json uses double quotes
-cml_text = cml_text[:-3] # Delete trailing newlines and comma
-cml_text += '\n}'
-with open(CHECKED_PATH, 'w', encoding='utf8') as checked_file:
-    checked_file.write(cml_text)
-
-# Write errorlog
-# url: [[org name, db type, crawl level], [[error number, error desc], [error number, error desc]], [final error flag, fallback flags]]
-e_text = '{\n'
-for k, v in error_urls_d.items(): e_text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n'
-e_text = e_text[:-3]
-e_text += '\n}'
-with open(ERROR_PATH, 'w', encoding='utf8') as error_file:
-    error_file.write(e_text)
-
+# Convert CML and errorlog to pretty format that can be read by humans and json
+def make_human_readable(in_dict, path):
+    ## this prevents resumption because json converts None to null: NameError: name 'null' is not defined
+    text = '{\n'
+    for k, v in in_dict.items(): text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n' # json uses double quotes
+    text = text[:-3] # Remove trailing newlines and comma
+    text += '\n}'
+    with open(path, 'w', encoding='utf8') as out_file:
+        out_file.write(text)
 
 
 # Stop timer and display stats
-duration = datetime.now() - startTime
-logger.info(f'\n\nPages checked = {len(checked_urls_d)}')
-logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
-logger.info(f'Pages/sec/tasks = {str((len(checked_urls_d) / duration.seconds) / SEMAPHORE)[:4]} \n')
-
-
-'''
-##
-# Delete queue.txt to indicate program completed successfully
-try:
-    os.remove(QUEUE_PATH)
-    logger.info(f'\nDeleted QUEUE_PATH file\n')
-except:
-    logger.info(f'\nFailed to delete QUEUE_PATH file\n')
-'''
-
-
-
-
-
-
+def display_stats():
+    duration = datetime.now() - startTime
+    logger.info(f'\n\nPages checked = {len(checked_urls_d)}')
+    logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
+    logger.info(f'Pages/sec/tasks = {str((len(checked_urls_d) / duration.seconds) / SEMAPHORE)[:4]} \n')
 
 
 # Allow one URL to cover multiple orgs
-file_count = 0
-org_count = 0
-for db_type, url_d in multi_org_d.items():
+def multi_org_copy():
+    file_count = 0
+    org_count = 0
+    for db_type, url_d in multi_org_d.items():
+        for url, org_names_l in url_d.items():
 
-    for url, org_names_l in url_d.items():
+            # URL is used by more than one org
+            if len(org_names_l) > 1:
+                src_path = os.path.join(RESULTS_PATH, db_type, org_names_l[0])  # Path to results of first org in list
 
-        # URL is used by more than one org
-        if len(org_names_l) > 1:
+                # Check if results exists for first org
+                if os.path.isdir(src_path):
+                    logger.debug(f'Copying: {src_path}')
 
-            src_path = os.path.join(RESULTS_PATH, db_type, org_names_l[0])  # Path to results of first org in list
+                    # Copy results from first org to all remaining orgs
+                    for dst_path in org_names_l[1:]:
+                        dst_path = os.path.join(RESULTS_PATH, db_type, dst_path)
+                        logger.debug(f'to:      {dst_path}')
+                        try: shutil.copytree(src_path, dst_path)
+                        except Exception: logger.exception(f'multiorg copy error')
+                        file_count += 1
+                    org_count += 1
 
-            # Check if results exists for first org
-            if os.path.isdir(src_path):
-                logger.debug(f'Copying: {src_path}')
-
-                # Copy results from first org to all remaining orgs
-                for dst_path in org_names_l[1:]:
-                    dst_path = os.path.join(RESULTS_PATH, db_type, dst_path)
-                    logger.debug(f'to:      {dst_path}')
-                    try: shutil.copytree(src_path, dst_path)
-                    except Exception: logger.exception(f'multiorg copy error')
-                    file_count += 1
-                org_count += 1
-
-            # this acts like a portal error for all other orgs in this list too. can also find these errors by finding multi_d orgs in the errorlog
-            # Detect no results for first multi_d org
-            else:
-                logger.info(f'multi_org portal errors: {org_names_l}')
-logger.info(f'\nMulti orgs: {org_count}')
-logger.info(f'Multi org files: {file_count}')
-
+                # this acts like a portal error for all other orgs in this list too. can also find these errors by finding multi_d orgs in the errorlog
+                # Detect no results for first multi_d org
+                else:
+                    logger.info(f'multi_org portal errors: {org_names_l}')
+    logger.info(f'\nMulti orgs: {org_count}')
+    logger.info(f'Multi org files: {file_count}')
 
 
 # Fallback to older results if newer results are missing
-dater_d = glob.glob(JORB_HOME_PATH + "/*")  # List all date dirs
-dater_d.sort(reverse=True)
-if len(dater_d) > 1:  # Skip if there are no old results
-    logger.info(f'\nFalling back to old results: {dater_d[1]}')
-    old_dater_results_dir = os.path.join(dater_d[1], 'results')
-    count = 0
+def fallback_old_copy():
+    dater_d = glob.glob(JORB_HOME_PATH + "/*")  # List all date dirs
+    dater_d.sort(reverse=True)
+    if len(dater_d) > 1:  # Skip if there are no old results
+        logger.info(f'\nFalling back to old results: {dater_d[1]}')
+        old_dater_results_dir = os.path.join(dater_d[1], 'results')
+        count = 0
 
-    # Loop through each results dir
-    for each_db in DB_TYPES:
+        # Loop through each results dir
+        for each_db in DB_TYPES:
 
-        # Select old and current db dirs
-        cur_db_dir = os.path.join(RESULTS_PATH, each_db)
-        old_db_dir = os.path.join(old_dater_results_dir, each_db)
-        inc_old_dir = os.path.join(RESULTS_PATH, 'include_old', each_db)
+            # Select old and current db dirs
+            cur_db_dir = os.path.join(RESULTS_PATH, each_db)
+            old_db_dir = os.path.join(old_dater_results_dir, each_db)
+            inc_old_dir = os.path.join(RESULTS_PATH, 'include_old', each_db)
 
-        # Loop through each org name dir in the old db type dir
-        for old_org_name_path in glob.glob(old_db_dir + '/*'):
-            old_org_name = old_org_name_path.split('/')[-1]  # Remove path from org name
+            # Loop through each org name dir in the old db type dir
+            for old_org_name_path in glob.glob(old_db_dir + '/*'):
+                old_org_name = old_org_name_path.split('/')[-1]  # Remove path from org name
 
-            # Check current db dir
-            for cur_org_name_path in glob.glob(cur_db_dir + '/*'):
+                # Check current db dir
+                for cur_org_name_path in glob.glob(cur_db_dir + '/*'):
 
-                # Skip if the new dir has the result
-                cur_org_name = cur_org_name_path.split('/')[-1]
-                if old_org_name == cur_org_name:
-                    break
+                    # Skip if the new dir has the result
+                    cur_org_name = cur_org_name_path.split('/')[-1]
+                    if old_org_name == cur_org_name:
+                        break
 
-            # If new org name dir is missing
-            else:
-                inc_org_name_path = inc_old_dir + '/' + old_org_name  # Make old_include/old_org_name dir
-
-                # Copy old org name dir to db type include_dir
-                if not os.path.exists(inc_org_name_path):
-                    shutil.copytree(old_org_name_path, inc_org_name_path)
-                    count += 1
-                    logger.debug(f'Copied fallback result: {old_org_name}')
-
-                # Catch errors
+                # If new org name dir is missing
                 else:
-                    logger.info(f'Already exists: {inc_org_name_path}')
+                    inc_org_name_path = inc_old_dir + '/' + old_org_name  # Make old_include/old_org_name dir
 
-logger.info(f'Files in /include_old: {count}')
+                    # Copy old org name dir to db type include_dir
+                    if not os.path.exists(inc_org_name_path):
+                        shutil.copytree(old_org_name_path, inc_org_name_path)
+                        count += 1
+                        logger.debug(f'Copied fallback result: {old_org_name}')
 
+                    # Catch errors
+                    else:
+                        logger.info(f'Already exists: {inc_org_name_path}')
+
+    logger.info(f'Files in /include_old: {count}')
+
+
+# Get recurring error URLs and add them to existing dict
+def auto_blacklist_update():
+    for url in err_parse.rec_errs_l:
+        url_dup = dup_checker(url)
+        auto_blacklist_d[url_dup] = today_dt.isoformat()
+
+    with open(AUTO_BL_PATH, "w") as f:
+        json.dump(auto_blacklist_d, f, indent=2)
 
 
 # Copy results to remote server using bash
-cmd_proc = subprocess.run(os.path.join(version_path, "push_results.sh"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-logging.info(cmd_proc.stdout)
+def send_to_server():
+    cmd_proc = subprocess.run(os.path.join(version_path, "push_results.sh"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    logging.info(cmd_proc.stdout)
 
 
 
-# Auto blacklist
-# Get recurring error URLs and add them to existing dict
+
+
+# Start async event loop
+asyncio.run(main(), debug=False)
+
+display_stats()
+
+multi_org_copy()
+fallback_old_copy()
+
+send_to_server()
+
 import err_parse
+auto_blacklist_update()
+make_human_readable(checked_urls_d, CHECKED_PATH)
+make_human_readable(error_urls_d, ERROR_PATH)
 
-for url in err_parse.rec_errs_l:
-    url_dup = dup_checker(url)
-    auto_blacklist_d[url_dup] = today_dt.isoformat()
 
-# Write file
-with open(AUTO_BL_PATH, "w") as f:
-    json.dump(auto_blacklist_d, f, indent=2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

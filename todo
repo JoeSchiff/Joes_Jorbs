@@ -1,29 +1,52 @@
 
 errors:
 progress higher than total + homepage fallback
-
+progress lower than total at end
 
 
 Todo:
-why conf in cml?
-rewrite errorlog using logging
+rewrite errorlog. with logging?
+    class inst to be more descriptive?
+    init with empty lists?
+    put all minor errors into new jj error
+    cml_text = '{\n'
+
 use pw req obj for ping
     ping as child class of pw?
 
 refactor
-  any func with instance as arg should be method?
-  clean return unn?
-  shared req fail handling +
-    jj error 3 and 6 +
-    polymorphism requester class +
-    sep content error +
+    any func with instance as arg should be method?
+    clean return unn?  useful for adding new workingo to queue
+    results.py and index
 
-separate functions
-  robots and proceed
-  post scrape
+
+results.py to do:
+    {e<=0}
+    remove from import
+    dict or class for res_list
+    reg_res = None
+    why browser in each results file?
+    move zips out of file +
+    reconsider skipping geodesic with high max_dist
+    remove zip_form? display purposes only. keep
+        why send coords from form?
+    show jj_error num in tooltip on error tabs?
+    improve code comments
+    optimise: two separate sections. one with geolimter function
+    reword error pages to discourage refreshing?
+    sort errors by alpha?
+    sort results by jbw conf or fuzzy match percent? user specified -
+    percent decode urls
+    wraparound text for mobile?
+    no error will be displayed if failed to read vis text file
+
+remove?
+    multiorg: results.py doesnt show duplicate urls
+    CML
+    clear_brows, brow_l: only 1 brow needed since pw stable
+    bash_ping, restart_nic
 
 logging module
-  always print task id + when available
     new id is assigned when using static reqs
 
 handle timeouts uniformly +
@@ -63,20 +86,11 @@ use asyncio.Event() instead of blocking: all_done_d,l pw_pause, asyncio.sleep
 net::ERR_NAME_NOT_RESOLVED should also be 404
 include error result in working_o?
 need checked lock? - dup ensures a url is processed only once, therefore one task at a time
-cml as a class?
 check for malformed urls? >>> r=urlparse('http:/joesjorbs.com') >>> if r.scheme and r.netloc: print(99)
-rewrite crawler
-prog count higher than total
-remove multiorg? results.py doesnt show duplicate urls
-all pause +
-  how check? start with pw then fallback to bash ping? pw > ping url > ping ip
-      url not ip to test dns?
 redundant error 7
   final or try with next reqer?
-  pw gets html and vis
 discard head elem from html. page.inner_html('body')
   resp.text vs page.inner_html vs page.text_content vs page.content() etc
-establish new jj_error numbers and letters
 add redirect history to checked pages. can be done with aiohttp, cant find for pw
 parent url may not be in errorlog on first error - remove code
 
@@ -111,19 +125,7 @@ document which orgs use a centralized service and exclude or include them from j
 dups in db. probably causes the dups found in cml? solved with multi org d?
 
 
-results.py to do:
-move zips out of file
-reconsider skipping geodesic with high max_dist
-remove zip_form? display purposes only. keep
-show jj_error num in tooltip on error tabs?
-improve code comments
-optimise: two separate sections. one with geolimter function
-reword error pages to discourage refreshing?
-sort errors by alpha?
-sort results by jbw conf or fuzzy match percent? user specified -
-percent decode urls
-wraparound text for mobile?
-no error will be displayed if failed to read vis text file
+
 
 
 index.html to do:

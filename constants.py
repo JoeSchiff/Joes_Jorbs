@@ -35,7 +35,6 @@ USER_AGENT_S = 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox
 
 
 
-## application?
 # Exclude links that contain any of these. percent encodings must be lower case
 BUNKWORDS = ('academics', '5il.co', '5il%2eco', 'pnwboces.org', 'recruitfront.com', 'schoolapp.wnyric.org', 'professional development', 'career development', 'javascript:', '.pdf', '.jpg', '.ico', '.rtf', '.doc', '.mp4', '%2epdf', '%2ejpg', '%2eico', '%2ertf', '%2edoc', '%2emp4', 'mailto:', 'tel:', 'icon', 'description', 'specs', 'specification', 'guide', 'faq', 'images', 'exam scores', 'resume-sample', 'resume sample', 'directory', 'pupil personnel')
 
