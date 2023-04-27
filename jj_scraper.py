@@ -544,7 +544,7 @@ def choose_requester(working_o, task_id, pw, session):
             
 
 # Request loop
-async def looper(pw, session):
+async def req_looper(pw, session):
     task_id = asyncio.current_task().get_name()
 
     # End looper if all tasks report empty queue
@@ -637,7 +637,6 @@ def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
     ## should this be called only on final error or success?
     # Update checked pages value to error code
     checked_urls_d_entry(workingurl_dup, err_code)
-    return True
 
 
 # Mark final errors in errorlog
@@ -852,7 +851,7 @@ async def init_pw_brows(pw):
         
 
 # Check internet connectivity
-async def ping_begin():
+async def ping_test():
     global pw_pause
     ping_tally = 0
     while True:
@@ -985,15 +984,28 @@ def display_prog():
     logger.info(f'len(restart_brow_set): {len(restart_brow_set)}')
 
 
-# Start scraper
-async def init_async_tasks(pw, session):
+# Start async tasks
+async def run_scraper(pw, session):
     for i in range(SEMAPHORE):
-        task = asyncio.create_task(looper(pw, session))
+        task = asyncio.create_task(req_looper(pw, session))
         all_done_d[task.get_name()] = False
 
 
+# Run housekeeping funcs and display progress
+async def maintenance():
+    try:
+        for intermittent_f in save_progress, ping_test, check_mem:
+            await intermittent_f()
+            display_prog()
+            await asyncio.sleep(8)
+
+    except Exception:
+        logger.exception(f'\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
+        await asyncio.sleep(2)
+
+
 # Main event loop
-async def main():
+async def main(all_urls_q, error_urls_d, checked_urls_d, multi_org_d):
     logger.info(f'\n Program Start')
 
     # Start Playwright and aiohttp
@@ -1001,23 +1013,11 @@ async def main():
     async with async_playwright() as pw, aiohttp.ClientSession(timeout=timeout) as session:
         await init_pw_brows(pw)
 
-        # Run scraper
-        await init_async_tasks(pw, session)
+        await run_scraper(pw, session)
 
         # Wait for scraping to finish
-        skip_tally = 0
         while not all(all_done_d.values()):
-            try:
-                # Run housekeeping funcs and display progress
-                for intermittent_f in save_progress, ping_begin, check_mem:
-                    await intermittent_f()
-                    display_prog()
-                    await asyncio.sleep(8)
-
-            except Exception:
-                logger.exception(f'\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
-                await asyncio.sleep(2)
-
+            await maintenance()
 
         # Scrape complete
         logger.info(f'  Scrape complete  '.center(70, '='))
@@ -1128,50 +1128,59 @@ def read_rp_file():
         domain_c.domain_d = rp_d
         
 
-        
 
-# Resume scraping using leftover results from the previously failed scraping attempt
-try:
-
-    # Read pickle queue of class objs
+# Resume by reading saved objs
+def recover_prog():
+    # pickle queue of class objs
     with open(QUEUE_PATH, "rb") as f:
         all_urls_q = pickle.load(f)
 
-    # Read errorlog file as dict
+    # errorlog as dict
     with open(ERROR_PATH, "r") as f:
         error_urls_d = json.load(f)
     logger.info(f'errorlog recovery complete')
 
-    # Read CML file as dict
+    # CML as dict
     with open(CHECKED_PATH, "r") as f:
         checked_urls_d = json.load(f)
     logger.info(f'CML recovery complete')
 
-    # Read multi_org_d file as dict
+    # multi_org_d as dict
     with open(MULTI_ORG_D_PATH, "r") as f:
         multi_org_d = json.load(f)
     logger.info(f'multi_org_d recovery complete')
 
     working_c.total_count = all_urls_q.qsize()
-    logger.info(f'File queue success')
+    logger.info(f'Progress recovery successful') 
+    return all_urls_q, error_urls_d, checked_urls_d, multi_org_d
 
 
-# Use original queue on any resumption error
-except Exception as errex:
+# New session
+def start_fresh():
     logger.info(f'Using an original queue {errex}')
 
     checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
     error_urls_d = {}  # URLs that have resulted in an error
+    multi_org_d = {'civ': {}, 'sch': {}, 'uni': {}}  # Nested dicts for multiple orgs covered by a URL
+    all_urls_q = asyncio.Queue()
+        
+    civ_db, sch_db, uni_db = read_dbs()  
+
+    for db, label in (civ_db, 'civ'), (sch_db, 'sch'), (uni_db, 'uni'):
+        all_urls_q = init_queue(all_urls_q, db, label)
+
+    working_c.total_count = all_urls_q.qsize()
+    return all_urls_q, error_urls_d, checked_urls_d, multi_org_d
 
 
-    # Read DBs
+# Get starting urls from file
+def read_dbs():
     with open(os.path.join(version_path, 'dbs/civ_db'), 'r') as f:
         civ_db = json.load(f)
     with open(os.path.join(version_path, 'dbs/sch_db'), 'r') as f:
         sch_db = json.load(f)
     with open(os.path.join(version_path, 'dbs/uni_db'), 'r') as f:
         uni_db = json.load(f)
-
 
     # Testing purposes
     '''
@@ -1184,39 +1193,33 @@ except Exception as errex:
     sch_db = []
     uni_db = []
     '''
+    
+    return civ_db, sch_db, uni_db
 
-    # Nested dicts for multiple orgs covered by a URL
-    multi_org_d = {}
-    multi_org_d['civ'] = {}
-    multi_org_d['sch'] = {}
-    multi_org_d['uni'] = {}
 
-    # Put all URLs into the queue
-    all_urls_q = asyncio.Queue()
-    for db, db_name in (civ_db, 'civ'), (sch_db, 'sch'), (uni_db, 'uni'):
-        for org_name, em_url, homepage in db:
+# Put starting URLs into the queue
+def init_queue(all_urls_q, db, label):
+    for org_name, em_url, homepage in db:
 
-            # Skip if em URL is missing or marked
-            if not em_url: continue
-            if em_url.startswith('_'): continue
+        # Skip if em URL is missing or marked
+        if not em_url: continue
+        if em_url.startswith('_'): continue
 
-            url_dup = dup_checker(em_url)
+        url_dup = dup_checker(em_url)
 
-            # URL as key, all org names using that URL as values
-            try:
-                multi_org_d[db_name][url_dup].append(org_name)  # Not first org using this URL
-                logger.debug(f'Putting in multi org dict: {em_url}')
-            except KeyError:
-                multi_org_d[db_name][url_dup] = [org_name]  # First org using this URL
-                #checked_urls_d_entry(url_dup, None)
+        # If that url is already in queue then mark it as multi org. After scraper copy results to all other orgs using that url
+        try:
+            multi_org_d[db_name][url_dup].append(org_name)  # Not first org using this URL
+            logger.debug(f'Putting in multi org dict: {em_url}')
+        except KeyError:
+            multi_org_d[db_name][url_dup] = [org_name]  # First org using this URL
 
-                # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
-                working_o = working_c(org_name, em_url, 0, homepage, db_name, url_dup, 0)
-                proceed(em_url)  # respect robots.txt
-                all_urls_q.put_nowait(working_o)
+            # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
+            working_o = working_c(org_name, em_url, 0, homepage, db_name, url_dup, 0)
+            proceed(em_url)  # respect robots.txt
+            all_urls_q.put_nowait(working_o)
 
-        db = None  # Clear
-        working_c.total_count = all_urls_q.qsize()
+    return all_urls_q
 
 
 
@@ -1361,7 +1364,6 @@ def send_to_server():
 
 
 
-make_dirs()
 
 # Locks
 q_lock = asyncio.Lock()
@@ -1375,31 +1377,41 @@ domain_lock = asyncio.Lock()
 brow_l = []
 restart_brow_set = set()
 
+pw_pause = False  # Tell all tasks to wait if there is no internet connectivity
+all_done_d = {}  # Each task states if the queue is empty
 #jbw_tally_ml = [] # Used to determine the frequency that jbws are used (debugging)
 
 
-pw_pause = False  # Tell all tasks to wait if there is no internet connectivity
-all_done_d = {}  # Each task states if the queue is empty
 
-blacklist, auto_blacklist_d = create_blacklists()
-read_rp_file()
-    
-# Start async event loop
-asyncio.run(main(), debug=False)
+if __name__ == '__main__':
+    make_dirs()
+    blacklist, auto_blacklist_d = create_blacklists()
+    read_rp_file()
 
-display_stats()
+    # Resume scraping using leftover results from the previously failed scraping attempt
+    try:
+        all_urls_q, error_urls_d, checked_urls_d, multi_org_d = recover_prog()
+    # Use original queue on any resumption error
+    except Exception as errex:
+        all_urls_q, error_urls_d, checked_urls_d, multi_org_d = start_fresh()
+        
 
-multi_org_copy()
-fallback_old_copy()
+    asyncio.run(main(all_urls_q, error_urls_d, checked_urls_d, multi_org_d), debug=False)
 
-send_to_server()
 
-import err_parse
-auto_blacklist_update(auto_blacklist_d)
-make_human_readable(checked_urls_d, CHECKED_PATH)
-make_human_readable(error_urls_d, ERROR_PATH)
+    display_stats()
 
-write_rp_file()  ## call this after scraper or immediatly after rp gets updated?
+    multi_org_copy()
+    fallback_old_copy()
+
+    send_to_server()
+
+    import err_parse
+    auto_blacklist_update(auto_blacklist_d)
+    make_human_readable(checked_urls_d, CHECKED_PATH)
+    make_human_readable(error_urls_d, ERROR_PATH)
+
+    write_rp_file()  ## call this after scraper or immediatly after rp gets updated?
 
 
 
