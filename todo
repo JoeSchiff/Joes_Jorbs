@@ -3,6 +3,7 @@ errors:
 progress higher than total + homepage fallback
 progress lower than total at end
 
+remove "Cant append error to errorlog"?
 
 Todo:
 rewrite errorlog. with logging?
@@ -15,13 +16,13 @@ use pw req obj for ping
     ping as child class of pw?
 
 refactor
-    any func with instance as arg should be method?
+    pass q, err log etc or make working_o class var?
     clean return unn?  useful for adding new workingo to queue
     results.py and index
 
 
 results.py to do:
-    {e<=0}
+    test {e<=0}
     remove from import
     dict or class for res_list
     reg_res = None
