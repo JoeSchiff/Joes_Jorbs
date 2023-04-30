@@ -4,6 +4,7 @@ import os
 import re
 from datetime import date
 
+
 JORB_HOME_PATH = '/home/joepers/joes_jorbs'
 
 DATER_PATH = os.path.join(JORB_HOME_PATH, date.today().isoformat())
@@ -24,15 +25,17 @@ AUTO_BL_PATH = os.path.join(PERSISTENT_PATH, 'auto_blacklist')
 DB_TYPES = ('civ', 'sch', 'uni')
 
 
+RP_EXPIRATION_DAYS = 180
+BLACKLIST_EXPIRATION_DAYS = 60
+
+
 # Scraper options
 MAX_CRAWL_DEPTH = 1  # Webpage recursion depth
 SEMAPHORE = 12  # Num of concurrent tasks
 EMPTY_CUTOFF = 200  # Num of characters in webpage text file to be considered empty
 DOMAIN_LIMIT = 20  # Max num of pages per domain
-RP_EXPIRATION_DAYS = 180
+HTTP_RETRY_ERROR_CODES = (403, 404)
 USER_AGENT_S = 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0'  ## used for only static req?
-
-
 
 
 # Exclude links that contain any of these. percent encodings must be lower case
@@ -40,7 +43,6 @@ BUNKWORDS = ('academics', '5il.co', '5il%2eco', 'pnwboces.org', 'recruitfront.co
 
 # Always skip these pages
 STATIC_BLACKLIST = ('cc.cnyric.org/districtpage.cfm?pageid=112', 'co.essex.ny.us/personnel', 'co.ontario.ny.us/94/human-resources', 'countyherkimer.digitaltowpath.org:10069/content/departments/view/9:field=services;/content/departmentservices/view/190', 'countyherkimer.digitaltowpath.org:10069/content/departments/view/9:field=services;/content/departmentservices/view/35', 'cs.monroecounty.gov/mccs/lists', 'herkimercounty.org/content/departments/view/9:field=services;/content/departmentservices/view/190', 'herkimercounty.org/content/departments/view/9:field=services;/content/departmentservices/view/35', 'jobs.albanyny.gov/default/jobs', 'monroecounty.gov/hr/lists', 'monroecounty.gov/mccs/lists', 'mycivilservice.rocklandgov.com/default/jobs', 'niagaracounty.com/employment/eligible-lists', 'ogdensburg.org/index.aspx?nid=345', 'penfield.org/multirss.php', 'tompkinscivilservice.org/civilservice/jobs', 'tompkinscivilservice.org/civilservice/jobs', 'swedishinstitute.edu/employment-at-swedish-institute', 'sunyacc.edu/job-listings')
-
 
 # Include links that include any of these
 # Set high and low confidence jbw lists
@@ -54,8 +56,6 @@ JBWS_CIV_LOW = JBWS_ALL_LOW + ('open to', 'civil service', 'exam', 'examination'
 JBWS_SU_HIGH = JBWS_ALL_HIGH
 JBWS_SU_LOW = JBWS_ALL_LOW
 JBWS_SU_X_LOW = ('faculty', 'staff', 'adjunct', 'academic', 'support', 'instructional', 'administrative', 'professional', 'classified', 'coaching')  ## unused third tier?
-
-
 
 # Compile regex paterns for reducing whitespace in written files
 WHITE_REG = re.compile("\s{2,}")

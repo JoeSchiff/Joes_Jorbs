@@ -48,41 +48,6 @@ def make_dirs():
         os.makedirs(const.ERR7_PATH)
 
 
-# Append asyncio task id if available to log
-class context_filter(logging.Filter):
-    def filter(self, record):
-        try:
-            record.task_id = f'- {asyncio.current_task().get_name()}'
-        except:
-            record.task_id = ''
-        return True
-
-# Config logging
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
-
-f_handler = logging.FileHandler(const.LOG_PATH, mode='a')
-f_handler.setLevel(logging.DEBUG)
-f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s %(task_id)s', datefmt='%H:%M:%S')
-f_handler.setFormatter(f_format)
-f_handler.addFilter(context_filter())
-
-c_handler = logging.StreamHandler()
-c_handler.setLevel(logging.INFO)
-c_format = logging.Formatter('%(levelname)s - %(message)s')
-c_handler.setFormatter(c_format)
-
-logger.addHandler(f_handler)
-logger.addHandler(c_handler)
-
-# Handle uncaught exceptions
-def uncaught_handler(exctype, value, tb):
-    logger.critical(f'------- UNCAUGHT {exctype}, {value}, {tb.tb_lineno}')
-sys.excepthook = uncaught_handler
-
-
-
-
 
 # The webpage object
 class working_c:
@@ -122,7 +87,7 @@ class working_c:
     # Add new working_o to the queue
     def add_to_queue(self):
 
-        working_c.checked_urls_d_entry(self.workingurl_dup, None)  # Add new entry to CML
+        checked_urls_d_entry(self.workingurl_dup, None)  # Add new entry to CML
 
         # Create new working list: [org name, URL, crawl level, parent URL, jbw type, url_dup, req attempt]
         new_working_o = working_c(self.org_name, self.workingurl, self.current_crawl_level, self.parent_url, self.jbw_type, self.workingurl_dup, 0)
@@ -167,7 +132,7 @@ class working_c:
 
                 # Update checked pages conf value to redirected
                 conf_val = 'redirected'
-                working_c.checked_urls_d_entry(self.workingurl_dup, conf_val, self.browser)
+                checked_urls_d_entry(self.workingurl_dup, conf_val, self.browser)
 
                 # Skip checked pages using redirected URL
                 return proceed(self.red_url)
@@ -269,7 +234,7 @@ class requester_base:
     def resp_err_handler(self, working_o):
 
         # Don't retry req
-        if self.resp.status == 404 or self.resp.status == 403:
+        if self.resp.status in const.HTTP_RETRY_ERROR_CODES:
             logger.warning(f'jj_error 4{self.ec_char}: {self.url} {self.status_text}')
             add_errorurls(working_o, f'jj_error 4{self.ec_char}', self.status_text, False)
 
@@ -370,7 +335,6 @@ class pw_req(requester_base):
 
 
     async def close(self):
-        print('no way')
         try:
             await self.context.close()
         except Exception:
@@ -429,7 +393,7 @@ def dup_checker(url):
     if url_dup.startswith('www'): url_dup = url_dup.split('.', maxsplit=1)[1]
 
     url_dup = url_dup.replace('//', '/') # Remove double forward slashes outside of scheme
-/') # Remove trailing whitespace and slash
+    url_dup = url_dup.strip(' \t\n\r/') # Remove trailing whitespace and slash
 
     return url_dup.lower()
 
@@ -442,12 +406,12 @@ def checked_urls_d_entry(url_dup, *args):
 
 
 # Get domain info and rp
-def get_robots_txt(url_dup):
+def get_robots_txt(url, url_dup):
     dup_domain = url_dup.split('/')[0]  # Excludes scheme and www
-    if dup_domain in domain_c.domain_d:  # Use cached robots.txt
-        return domain_c.domain_d[dup_domain]
+    if dup_domain in bot_excluder.domain_d:  # Use cached robots.txt
+        return bot_excluder.domain_d[dup_domain]
     else:
-        return domain_c(url, dup_domain)  # Request robots.txt
+        return bot_excluder(url, url_dup, dup_domain)  # Request robots.txt
 
 
 # Determine if url should be requested
@@ -467,15 +431,15 @@ def proceed(url) -> bool:
 
 
     # Check robots.txt
-    domain_o = get_robots_txt(url_dup)
+    domain_o = get_robots_txt(url, url_dup)
     if not domain_o.can_req(url):
         return False
 
 
     # Exclude if the new_url is on the blacklist
-    if url_dup in blacklist:
+    if url_dup in blacklist.combined_l:
         logger.info(f'Blacklist invoked: {url_dup}')
-        working_c.checked_urls_d_entry(url_dup, 'Blacklist invoked')
+        checked_urls_d_entry(url_dup, 'Blacklist invoked')
         return False
 
     # Declare to proceed
@@ -572,14 +536,14 @@ async def req_looper(pw, session):
 def req_success(working_o):
     working_c.prog_count += 1
 
-    logger.debug(f'begin domain_o.update {working_o} {domain_c.domain_d[working_o.dup_domain]}')
-    domain_c.domain_d[working_o.dup_domain].update()  # Inc domain_count
+    logger.debug(f'begin robots.txt update {working_o} {bot_excluder.domain_d[working_o.dup_domain]}')
+    bot_excluder.domain_d[working_o.dup_domain].update()  # Inc domain_count
 
     logger.debug(f'begin fallback_success {working_o}')
     working_o.fallback_success()  # Check and update fallback
 
     working_o.count_jbws()
-    working_c.checked_urls_d_entry(working_o.workingurl_dup, working_o.jbw_count, working_o.browser)  # Update outcome in working_c.checked_urls_d
+    checked_urls_d_entry(working_o.workingurl_dup, working_o.jbw_count, working_o.browser)  # Update outcome in working_c.checked_urls_d
 
     logger.debug(f'begin check_red {working_o}')
     if not working_o.check_red():  # Check if redirect URL has been processed already
@@ -625,7 +589,7 @@ def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
 
     ## should this be called only on final error or success?
     # Update checked pages value to error code
-    working_c.checked_urls_d_entry(workingurl_dup, err_code)
+    checked_urls_d_entry(workingurl_dup, err_code)
 
 
 # Mark final errors in errorlog
@@ -931,7 +895,7 @@ async def save_progress():
                 pickle.dump(working_c.all_urls_q, f)
 
         # CML, errorlog, and multiorg
-        for each_path, each_dict in (const.CHECKED_PATH, working_c.checked_urls_d), (const.ERROR_PATH, working_c.error_urls_d), (working_c.multi_org_d_PATH, working_c.multi_org_d):
+        for each_path, each_dict in (const.CHECKED_PATH, working_c.checked_urls_d), (const.ERROR_PATH, working_c.error_urls_d), (const.MULTI_ORG_D_PATH, working_c.multi_org_d):
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
     except Exception:
@@ -943,7 +907,7 @@ async def save_progress():
 async def check_mem():
     if psutil.virtual_memory()[2] > 50:
         logger.error(f'Memory usage too high. Restarting browser: {pw_req.brow_l[0]}')
-        await clear_brows(pw, pw_req.brow_l[0])
+        #await clear_brows(pw, pw_req.brow_l[0])
 
 
 # Display progress
@@ -974,7 +938,7 @@ async def maintenance():
             await asyncio.sleep(8)
 
     except Exception:
-        logger.exception(f'\nprog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
+        logger.exception(f'\nmaintenance __ERROR: {sys.exc_info()[2].tb_lineno}')
         await asyncio.sleep(2)
 
 
@@ -1012,32 +976,35 @@ async def cleanup():
 
 
 # robots.txt and domain tracker used for rate limiting
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
-
-class domain_c:
-    domain_d = {}
+class bot_excluder:
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
+    domain_d = {}  # Holds all robots.txts
 
     @timeout_decorator.timeout(8)
-    def __init__(self, url, dup_domain):
-        self.domain = '://'.join(parse.urlparse(url)[:2])  # Includes scheme and www.
-        logger.info(f'new domain: {self.domain} {dup_domain}')
-
+    def __init__(self, url, url_dup, dup_domain):
+        logger.info(f'new domain: {dup_domain}')
+        self.rp = robotparser.RobotFileParser()
         self.last_req_ts = 0.0
         self.domain_count = 0
 
         # Get robots.txt
+        self.set_robots_txt_path(url)
         try:
-            self.rp = robotparser.RobotFileParser()
-            self.rp.set_url(parse.urljoin(self.domain, "robots.txt"))
             self.rp.read()  # req
             logger.debug(f"rp printout: {self.rp.allow_all} {self.rp.disallow_all} {self.rp.can_fetch('*', '*')} {self.rp.url}")
         except Exception as errex :
-            logger.warning(f'__error: rp read: {self.domain} {errex}')
+            logger.warning(f'__error: rp read: {dup_domain} {errex}')
             self.rp = None
 
         # Store rp so it is requested only once
-        domain_c.domain_d[dup_domain] = self
+        bot_excluder.domain_d[dup_domain] = self
+
+
+    def set_robots_txt_path(self, url):
+        domain = '://'.join(parse.urlparse(url)[:2])  # Includes scheme and www.
+        self.rp.set_url(parse.urljoin(domain, "robots.txt"))
+
 
     # After req
     def update(self):
@@ -1059,72 +1026,31 @@ class domain_c:
             if crawl_delay:
                 time_elapsed = datetime.now().timestamp() - self.last_req_ts
                 if time_elapsed < crawl_delay:
-                    logger.info(f'rp crawl delay wait: {url_dup} {crawl_delay} {time_elapsed}')
+                    logger.info(f'rp crawl delay wait: {url} {crawl_delay} {time_elapsed}')
                     # put back in queue or wait
                     import time
                     #time.sleep(crawl_delay - time_elapsed)
 
         # Exclude if domain occurrence limit is exceeded
         if self.domain_count > const.DOMAIN_LIMIT:
-            logger.info(f'Domain limit exceeded: {url_dup} {self.domain_count}')
-            working_c.checked_urls_d_entry(url_dup, 'Domain limit exceeded')
+            logger.info(f'Domain limit exceeded: {url} {self.domain_count}')
+            checked_urls_d_entry(url_dup, 'Domain limit exceeded')
             return False
 
 
-    
 
-class blacklist:
-
-    
-    # Combine auto blacklist from recurring errors file and static blacklist
-    def create_blacklists(self):
-        try:
-            with open(const.AUTO_BL_PATH, "r") as f:
-                auto_blacklist_d = json.load(f)
-        except Exception:
-            logger.exception(f'cant open blacklist file')
-            auto_blacklist_d = {}
-
-        auto_blacklist_d = purge_auto_blacklist(auto_blacklist_d)
-        blacklist = const.STATIC_BLACKLIST + tuple(auto_blacklist_d)
-        return blacklist, auto_blacklist_d
-
-
-    # Remove expired entries
-    def purge_auto_blacklist(auto_blacklist_d):
-        for url, bl_date_s in auto_blacklist_d.items():
-            bl_date_dt = date.fromisoformat(bl_date_s)
-            if bl_date_dt + timedelta(days=60) > date.today():
-                rem_l.append(url)
-
-        # Remove after iteration
-        for url in rem_l:
-            logger.info(f'Removing expired auto blacklist entry: {url} {bl_date_s}')
-            del auto_blacklist_d[url]
-
-        return auto_blacklist_d
-
-
-    # Get recurring error URLs and add them to existing dict
-    def update_auto_blacklist(auto_blacklist_d):
-        for url in err_parse.rec_errs_l:
-            url_dup = dup_checker(url)
-            auto_blacklist_d[url_dup] = date.today().isoformat()
-
-        with open(const.AUTO_BL_PATH, "w") as f:
-            json.dump(auto_blacklist_d, f, indent=2)
-
-
-
-# Reuse old robots.txts
+# Reuse old robots.txts. If sucessful this will populate bot_excluder.domain_d
 def read_rp_file():
+    bot_excluder.domain_d = {}  # Default to empty
     try:
         with open(const.RP_PATH, 'rb') as rp_file:
             rp_d = pickle.load(rp_file)
+            check_rp_file_expiration(rp_d)
     except Exception:
         logger.exception(f'RP file read failed:')
-        domain_c.domain_d = {}
 
+
+def check_rp_file_expiration(rp_d):
     # Get time robots.txt was fetched
     for i in rp_d.values():
         ts = i.rp.mtime()
@@ -1137,7 +1063,52 @@ def read_rp_file():
         logger.warning(f'rp_file outdated: {datetime.fromtimestamp(ts).isoformat()}')
     else:
         logger.info(f'rp_file still valid: {datetime.fromtimestamp(ts).isoformat()}')
-        domain_c.domain_d = rp_d
+        bot_excluder.domain_d = rp_d
+
+
+# Write robots.txts to file
+def write_rp_file():
+    with open(const.RP_PATH, 'wb') as rp_file:
+        pickle.dump(bot_excluder.domain_d, rp_file)
+    logger.info(f'RP file written')
+    
+
+class blacklist_c:
+    # Combine recurring errors file and static blacklist
+    def __init__(self):
+        try:
+            with open(const.AUTO_BL_PATH, "r") as f:
+                self.auto_blacklist_d = json.load(f)
+        except Exception:
+            logger.exception(f'cant open blacklist file')
+            self.auto_blacklist_d = {}
+
+        self.purge_auto_blacklist()
+        blacklist_c.combined_l = const.STATIC_BLACKLIST + tuple(self.auto_blacklist_d)
+
+
+    # Remove expired entries
+    def purge_auto_blacklist(self):
+        rem_l = []
+        for url, bl_date_s in self.auto_blacklist_d.items():
+            bl_date_dt = date.fromisoformat(bl_date_s)
+            if bl_date_dt + timedelta(days=const.BLACKLIST_EXPIRATION_DAYS) > date.today():
+                rem_l.append(url)
+
+        # Remove after iteration
+        for url in rem_l:
+            logger.info(f'Removing expired auto blacklist entry: {url} {bl_date_s}')
+            del self.auto_blacklist_d[url]
+
+
+    # Get recurring error URLs and add them to existing dict
+    def update_auto_blacklist(self):
+        for url in err_parse.rec_errs_l:
+            url_dup = dup_checker(url)
+            self.auto_blacklist_d[url_dup] = date.today().isoformat()
+
+        with open(const.AUTO_BL_PATH, "w") as f:
+            json.dump(self.auto_blacklist_d, f, indent=2)
 
 
 
@@ -1158,7 +1129,7 @@ def recover_prog():
     logger.info(f'CML recovery complete')
 
     # working_c.multi_org_d as dict
-    with open(working_c.multi_org_d_PATH, "r") as f:
+    with open(const.MULTI_ORG_D_PATH, "r") as f:
         working_c.multi_org_d = json.load(f)
     logger.info(f'working_c.multi_org_d recovery complete')
 
@@ -1168,16 +1139,17 @@ def recover_prog():
 
 # New session
 def start_fresh():
-    logger.info(f'Using an original queue {errex}')
+    logger.info(f'Using an original queue')
 
     working_c.checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
     working_c.error_urls_d = {}  # URLs that have resulted in an error
     working_c.multi_org_d = {'civ': {}, 'sch': {}, 'uni': {}}  # Nested dicts for multiple orgs covered by a URL
+    working_c.all_urls_q = asyncio.Queue()
 
     civ_db, sch_db, uni_db = read_dbs()
 
-    for db, label in (civ_db, 'civ'), (sch_db, 'sch'), (uni_db, 'uni'):
-        init_queue(db, label)
+    for db, db_label in (civ_db, 'civ'), (sch_db, 'sch'), (uni_db, 'uni'):
+        init_queue(db, db_label)
 
     working_c.total_count = working_c.all_urls_q.qsize()
 
@@ -1207,8 +1179,7 @@ def read_dbs():
 
 
 # Put starting URLs into the queue
-def init_queue(db, label):
-    working_c.all_urls_q = asyncio.Queue()
+def init_queue(db, db_label):
     for org_name, em_url, homepage in db:
 
         # Skip if em URL is missing or marked
@@ -1219,23 +1190,19 @@ def init_queue(db, label):
 
         # If that url is already in queue then mark it as multi org. After scraper copy results to all other orgs using that url
         try:
-            working_c.multi_org_d[db_name][url_dup].append(org_name)  # Not first org using this URL
+            working_c.multi_org_d[db_label][url_dup].append(org_name)  # Not first org using this URL
             logger.debug(f'Putting in multi org dict: {em_url}')
         except KeyError:
-            working_c.multi_org_d[db_name][url_dup] = [org_name]  # First org using this URL
+            working_c.multi_org_d[db_label][url_dup] = [org_name]  # First org using this URL
 
             # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
-            working_o = working_c(org_name, em_url, 0, homepage, db_name, url_dup, 0)
+            working_o = working_c(org_name, em_url, 0, homepage, db_label, url_dup, 0)
             proceed(em_url)  # respect robots.txt
             working_c.all_urls_q.put_nowait(working_o)
 
 
 
-# Write RP to file
-def write_rp_file():
-    with open(const.RP_PATH, 'wb') as rp_file:
-        pickle.dump(domain_c.domain_d, rp_file)
-    logger.info(f'RP file written')
+
 
 
 
@@ -1339,14 +1306,50 @@ def fallback_old_copy():
 
 
 
-
-
 # Copy results to remote server using bash
 def send_to_server():
     cmd_proc = subprocess.run(os.path.join(version_path, "push_results.sh"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     logging.info(cmd_proc.stdout)
 
 
+
+
+
+
+# Append asyncio task id if available to log
+class context_filter(logging.Filter):
+    def filter(self, record):
+        try:
+            record.task_id = f'- {asyncio.current_task().get_name()}'
+        except:
+            record.task_id = ''
+        return True
+
+
+# Config logging
+logger = logging.getLogger()
+def config_logger():
+    logger.setLevel(logging.DEBUG)
+
+    f_handler = logging.FileHandler(const.LOG_PATH, mode='a')
+    f_handler.setLevel(logging.DEBUG)
+    f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s %(task_id)s', datefmt='%H:%M:%S')
+    f_handler.setFormatter(f_format)
+    f_handler.addFilter(context_filter())
+
+    c_handler = logging.StreamHandler()
+    c_handler.setLevel(logging.INFO)
+    c_format = logging.Formatter('%(levelname)s - %(message)s')
+    c_handler.setFormatter(c_format)
+
+    logger.addHandler(f_handler)
+    logger.addHandler(c_handler)
+
+
+# Handle uncaught exceptions
+def uncaught_handler(exctype, value, tb):
+    logger.critical(f'------- UNCAUGHT {exctype}, {value}, {tb.tb_lineno}')
+#sys.excepthook = uncaught_handler
 
 
 
@@ -1363,7 +1366,8 @@ domain_lock = asyncio.Lock()
 
 if __name__ == '__main__':
     make_dirs()
-    blacklist, auto_blacklist_d = create_blacklists()
+    config_logger()
+    blacklist_o = blacklist_c()
     read_rp_file()
 
     # Resume scraping using leftover results from the previously failed scraping attempt
@@ -1372,24 +1376,22 @@ if __name__ == '__main__':
     # Use original queue on any resumption error
     except Exception as errex:
         start_fresh()
-
+    write_rp_file()  ## call this after scraper or immediatly after rp gets updated?
 
     asyncio.run(main(), debug=False)
 
-
     display_stats()
-
     multi_org_copy()
     fallback_old_copy()
 
     send_to_server()
 
     import err_parse
-    update_auto_blacklist(auto_blacklist_d)
+    blacklist_o.update_auto_blacklist()
     make_human_readable(working_c.checked_urls_d, const.CHECKED_PATH)
     make_human_readable(working_c.error_urls_d, const.ERROR_PATH)
 
-    write_rp_file()  ## call this after scraper or immediatly after rp gets updated?
+
 
 
 
