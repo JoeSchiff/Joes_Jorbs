@@ -393,7 +393,9 @@ class requester_base:
 
 
 class pw_req(requester_base):
-    brow_l = []  # For restarting pw browsers
+    session = await async_playwright().start()
+    init_pw_brows()
+    
     def __init__(self, pw, working_o):
         self.name = 'pw'
         self.ec_char = 'a'
@@ -470,6 +472,69 @@ class pw_req(requester_base):
             return "", ""
 
 
+
+
+    # Restart pw browsers
+    async def clear_brows(*args):
+        logger.info(f'Begin clear_brows_f {args}')
+        restart_brow_set = set()
+
+        # Manual and auto restart
+        for brow in list(args) + pw_req.brow_l:
+            if not brow.is_connected():
+                logger.warning(f'brow not connected {brow}')
+                async with brow_lock:
+                    pw_req.brow_l.remove(brow)
+                async with restart_brow_lock:
+                    restart_brow_set.add(brow)
+
+        # Restart nonworking pw browsers
+        logger.debug(f'restart_brow_set: {restart_brow_set}')
+        for brow in restart_brow_set:
+            brow_name = brow._impl_obj._browser_type.name
+
+            # Wait for tasks to depopulate the browser before closing
+            for i in range(20):
+                if len(brow.contexts) > 0:
+                    logger.debug(f'cons still open open: {brow.contexts}')
+                    await asyncio.sleep(1)
+                else:
+                    logger.info(f'Closing brow: {brow}')
+                    break
+            else:
+                logger.warning(f'brow depop timeout {brow}')
+
+            # Close original browser
+            await brow.close()
+
+            # Start replacement browsers
+            if brow_name == 'chromium':
+                logger.debug(f'starting chromium')
+                new_browser = await pw.chromium.launch(args=['--disable-gpu'])
+            elif brow_name == 'firefox':
+                logger.debug(f'starting firefox')
+                new_browser = await pw.firefox.launch()
+            else:
+                logger.error(f'__error: cant detect browser name {brow} {brow_name}')
+                continue
+
+            logger.info(f'Started new brow: {new_browser}')
+            async with brow_lock:
+                pw_req.brow_l.append(new_browser)
+
+
+
+    # Start primary and fallback pw browsers
+    async def init_pw_brows():
+        pw_req.brow_l = []  # Available pw browsers and for restarting
+        brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
+        pw_req.brow_l.append(brow)
+
+        brow = await pw_req.session.firefox.launch()
+        pw_req.brow_l.append(brow)
+
+
+
     async def close(self):
         try:
             await self.context.close()
@@ -477,8 +542,16 @@ class pw_req(requester_base):
             logger.exception(f'cant close pw context')
 
 
+class pw_ping(pw_req):
+    def __init__(self, pw):
+        working_o = working_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com', 0)
+        super().__init__(working_o)
+
+
 
 class static_req(requester_base):
+    session = await aiohttp.ClientSession(timeout=timeout)
+    
     def __init__(self, session, working_o):
         self.name = 'static'
         self.ec_char = 'b'
@@ -718,64 +791,6 @@ async def final_error(working_o):
 
 
 
-# Restart pw browsers
-async def clear_brows(pw, *args):
-    logger.info(f'Begin clear_brows_f {args}')
-    restart_brow_set = set()
-
-    # Manual and auto restart
-    for brow in list(args) + pw_req.brow_l:
-        if not brow.is_connected():
-            logger.warning(f'brow not connected {brow}')
-            async with brow_lock:
-                pw_req.brow_l.remove(brow)
-            async with restart_brow_lock:
-                restart_brow_set.add(brow)
-
-    # Restart nonworking pw browsers
-    logger.debug(f'restart_brow_set: {restart_brow_set}')
-    for brow in restart_brow_set:
-        brow_name = brow._impl_obj._browser_type.name
-
-        # Wait for tasks to depopulate the browser before closing
-        for i in range(20):
-            if len(brow.contexts) > 0:
-                logger.debug(f'cons still open open: {brow.contexts}')
-                await asyncio.sleep(1)
-            else:
-                logger.info(f'Closing brow: {brow}')
-                break
-        else:
-            logger.warning(f'brow depop timeout {brow}')
-
-        # Close original browser
-        await brow.close()
-
-        # Start replacement browsers
-        if brow_name == 'chromium':
-            logger.debug(f'starting chromium')
-            new_browser = await pw.chromium.launch(args=['--disable-gpu'])
-        elif brow_name == 'firefox':
-            logger.debug(f'starting firefox')
-            new_browser = await pw.firefox.launch()
-        else:
-            logger.error(f'__error: cant detect browser name {brow} {brow_name}')
-            continue
-
-        logger.info(f'Started new brow: {new_browser}')
-        async with brow_lock:
-            pw_req.brow_l.append(new_browser)
-
-
-
-# Start primary and fallback pw browsers
-async def init_pw_brows(pw):
-    brow = await pw.chromium.launch(args=['--disable-gpu'])
-    pw_req.brow_l.append(brow)
-
-    brow = await pw.firefox.launch()
-    pw_req.brow_l.append(brow)
-
 
 # Check internet connectivity
 async def ping_test():
@@ -783,11 +798,9 @@ async def ping_test():
     while True:
         try:
             logger.debug(f'pw ping begin')
-            brow = pw_req.brow_l[0]
-            context = await brow.new_context(ignore_https_errors=True)
-            page = await context.new_page()
-            page.set_default_timeout(5000)
-            resp = await page.goto('http://joesjorbs.com')
+            ping_o = pw_ping()
+            await ping_o.request_url()
+            if ping_o.resp.status == 200:
 
             # Success
             if resp.status == 200:
@@ -803,7 +816,7 @@ async def ping_test():
 
         finally:
             try:
-                await context.close()
+                await ping_o.close()
             except Exception:
                 logger.exception(f'ping: could not close context')
 
@@ -936,7 +949,6 @@ async def main():
     # Start Playwright and aiohttp
     timeout = aiohttp.ClientTimeout(total=8)
     async with async_playwright() as pw, aiohttp.ClientSession(timeout=timeout) as session:
-        await init_pw_brows(pw)
 
         await run_scraper(pw, session)
 
@@ -971,6 +983,7 @@ class bot_excluder:
     @timeout_decorator.timeout(8)
     def __init__(self, url, url_dup, dup_domain):
         logger.info(f'new domain: {dup_domain}')
+        self.lock = asyncio.Lock()
         self.rp = robotparser.RobotFileParser()
         self.last_req_ts = 0.0
         self.domain_count = 0
@@ -996,9 +1009,9 @@ class bot_excluder:
     # After req
     def update(self):
         #logger.debug(f"update start")
-        #with domain_lock:
-        self.last_req_ts = datetime.now().timestamp()
-        self.domain_count += 1
+        with self.lock:
+            self.last_req_ts = datetime.now().timestamp()
+            self.domain_count += 1
         #logger.debug(f"update complete")
 
 
@@ -1346,7 +1359,6 @@ brow_lock = asyncio.Lock()
 restart_brow_lock = asyncio.Lock()
 err_lock = asyncio.Lock()
 check_lock = asyncio.Lock()
-domain_lock = asyncio.Lock()
 
 
 
