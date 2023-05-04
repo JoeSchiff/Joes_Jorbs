@@ -75,32 +75,61 @@ class working_c:
             self.jbws_low_conf = const.JBWS_SU_LOW
 
 
-    # Print important attributes
     def __str__(self):
         return f'{self.org_name} {self.workingurl} {self.current_crawl_level} {self.parent_url} {self.jbw_type} {self.workingurl_dup} {self.req_attempt_num} {self.domain} {self.dup_domain}'
 
-    # Get important attributes
+
+    # Get important attributes. useful for adding new workingo to queue
     def clean_return(self):
         return self.org_name, self.workingurl, self.current_crawl_level, self.parent_url, self.jbw_type, self.workingurl_dup, self.req_attempt_num
 
 
     # Add new working_o to the queue
-    def add_to_queue(self):
+    async def add_to_queue(self,
+        workingurl = self.workingurl,
+        current_crawl_level = self.current_crawl_level,
+        parent_url = self.parent_url,
+        workingurl_dup = self.workingurl_dup,
+        req_attempt_num = 0):
 
         checked_urls_d_entry(self.workingurl_dup, None)  # Add new entry to CML
 
         # Create new working list: [org name, URL, crawl level, parent URL, jbw type, url_dup, req attempt]
-        new_working_o = working_c(self.org_name, self.workingurl, self.current_crawl_level, self.parent_url, self.jbw_type, self.workingurl_dup, 0)
+        new_working_o = working_c(self.org_name, workingurl, current_crawl_level, parent_url, self.jbw_type, workingurl_dup, req_attempt_num)
         logger.debug(f'Putting list into queue: {new_working_o}')
         logger.debug(f'From: {self.parent_url}')
 
         # Put new working list in queue
         try:
-            #with q_lock:
-            working_c.all_urls_q.put_nowait(new_working_o)
-            working_c.total_count += 1
+            async with q_lock:
+                working_c.all_urls_q.put_nowait(new_working_o)
+                working_c.total_count += 1
         except Exception:
             logger.exception(f'__Error trying to put into all_urls_q: {new_working_o}')
+
+
+    # Choose requester based on attempt number
+    async def choose_requester(self, task_id, pw, session):
+        self.req_attempt_num += 1
+        try:
+            if self.req_attempt_num < 3:
+                return pw_req(pw, self)
+
+            elif self.req_attempt_num < 5:
+                return static_req(session, self)
+
+            else:
+                logger.info(f'All retries exhausted: {self.workingurl} {self.req_attempt_num}')
+                working_c.prog_count += 1
+
+        except asyncio.TimeoutError as errex:  ## not possible without wait for?
+            logger.warning(f'looper timeout __error: {errex} {self.workingurl}')
+            await add_errorurls(self, 'jj_error 8', 'looper timeout', True)
+
+        except Exception as errex:
+            logger.exception(f'looper __error: {sys.exc_info()[2].tb_lineno}')
+            await add_errorurls(self, 'jj_error 9', errex, True)
+
 
 
     # Mark errorlog portal url entry as successful fallback. ie: portal failed so now using homepage instead. don't count as portal error
@@ -139,6 +168,113 @@ class working_c:
 
         # Return True on all other results
         return True
+
+
+
+    # If request failed on first URL (portal), use homepage as fallback
+    async def homepage_fallback(self):
+        if self.current_crawl_level != 0:
+            return
+
+        logger.info(f'Using URL fallback: {self.parent_url}')
+
+        if proceed(self.parent_url):
+            working_c.prog_count -= 1  ## undo progress count from final error
+            await self.add_to_queue(workingurl=self.parent_url, current_crawl_level=-1, parent_url=self.workingurl, workingurl_dup=dup_checker(self.parent_url))
+
+
+
+    # Include pagination links
+    async def get_pagination(self):
+        for pag_class in self.soup.find_all(class_='pagination'):
+            logger.info(f'pagination class found: {self.workingurl}')
+            for anchor_tag in pag_class.find_all('a'):  # Find anchor tags
+                logger.info(f'anchor_tag.text {anchor_tag.text}')
+                if 'next' in anchor_tag.text.lower():  # Find "next" page url
+
+                    # Add to queue
+                    abspath = parse.urljoin(self.domain, anchor_tag.get('href'))
+                    if proceed(abspath):
+                        logger.info(f'Adding pagination url: {abspath} {self.workingurl}')
+                        await self.add_to_queue(workingurl=abspath, parent_url=self.workingurl, workingurl_dup=dup_checker(abspath))
+
+                ## look for next page button represented by angle bracket
+                elif '>' in anchor_tag.text:
+                    logger.debug(f'pagination angle bracket {anchor_tag.text}')
+
+
+    # Find more links
+    def get_links(self):
+        new_urls = set()
+        for anchor_tag in self.soup.find_all('a'):
+
+            # Widen search of jbws if only 1 url in elem. should this be recursive? ie grandparent
+            if len(anchor_tag.parent.find_all('a')) == 1:
+                tag = anchor_tag.parent
+            else:
+                tag = anchor_tag
+
+            # Newlines will mess up jbw and bunk detection
+            for br in tag.find_all("br"):
+                br.replace_with(" ")
+
+            # Skip if the tag contains a bunkword
+            if any(bunkword in str(tag).lower() for bunkword in const.BUNKWORDS):
+                #logger.debug(f'Bunk word detected: {self.workingurl} {str(tag)[:99]}')
+                continue
+
+            # Skip if no jobwords in content
+            ## use this for only high conf jbws
+            tag_content = str(tag.text).lower()
+            if not any(jbw in tag_content for jbw in self.jbws_high_conf):
+                #logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
+                continue
+
+            '''
+            ## use this for either low or high conf jbws, with new low conf format
+            if not any(ttt in tag_content for ttt in jbws_high_conf + jbws_low_conf):
+                if self.jbw_type == 'civ': continue
+                # Exact match only for sch and uni extra low conf jbws
+                else:
+                    if not tag_content in jbws_su_x_low: continue
+            '''
+
+
+            bs_url = anchor_tag.get('href')
+            abspath = parse.urljoin(self.domain, bs_url).strip()  # Convert relative paths to absolute and strip whitespace
+            logger.debug(f'abspath: {abspath} {tag_content}')
+            # Remove non printed characters
+            #abspath = abspath.encode('ascii', 'ignore').decode()
+            #abspath = parse.quote(abspath)
+
+            new_urls.add(abspath)
+
+        logger.info(f'Found {len(new_urls)} new links from {self.workingurl}')
+        return new_urls
+
+
+    # Explore html to find more links and weigh confidence
+    async def crawler(self):
+        try:
+            # Search for pagination links before checking crawl level
+            await get_pagination(self)
+
+            # Limit crawl level
+            if self.current_crawl_level > const.MAX_CRAWL_DEPTH:
+                return
+
+            logger.debug(f'Begin crawling: {self.workingurl}')
+            self.current_crawl_level += 1
+
+            # Check new URLs and append to queue
+            for abspath in get_links(self):
+                if proceed(abspath):
+                    await self.add_to_queue(workingurl=abspath, workingurl_dup=dup_checker(abspath), parent_url=self.workingurl)
+
+        except Exception as errex:
+            logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {str(traceback.format_exc())} {self}')
+            await add_errorurls(self, 'jj_error 1', str(errex), True)
+            return
 
 
     # Determine confidence that a page has job postings
@@ -190,18 +326,18 @@ class requester_base:
 
 
     # Exclude forbidden content types. ex: pdf
-    def content_type_check(self, working_o):
+    async def content_type_check(self, working_o):
         content_type = self.resp.headers['content-type']
         if 'text/html' in content_type:
             return True
         else:
             logger.info(f'jj_error 2{self.ec_char}: Forbidden content type: {content_type} {self.url}')
-            add_errorurls(working_o, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
+            await add_errorurls(working_o, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
             return False
 
 
     # Check for minimum amount of content. ex soft 404
-    def check_vis_text(self, working_o):
+    async def check_vis_text(self, working_o):
         logger.debug(f'begin check_vis_text {self.url}')
         self.vis_text = re.sub(const.WHITE_REG, " ", self.vis_text).lower()  # Reduce excess whitespace with regex
 
@@ -209,7 +345,7 @@ class requester_base:
             return True
         else:
             logger.warning(f'jj_error 7: Empty vis text: {self.url} {len(self.vis_text)}')
-            add_errorurls(working_o, 'jj_error 7', 'Empty vis text', False)
+            await add_errorurls(working_o, 'jj_error 7', 'Empty vis text', False)
 
             # Debug err7 by saving to separate dir
             url_path = parse.quote(self.url, safe=':')
@@ -224,35 +360,35 @@ class requester_base:
     def add_html(self, working_o):
         working_o.html = self.html
         working_o.vis_text = self.vis_text
-        working_o.red_url = self.resp.url
+        working_o.red_url = str(self.resp.url)  # aiohttp returns yarl obj not str
         working_o.browser = self.name
         working_o.soup = BeautifulSoup(self.html, 'html5lib').find('body')
         logger.debug(f'added html: {self.url}')
 
 
     # Act on response status number
-    def resp_err_handler(self, working_o):
+    async def resp_err_handler(self, working_o):
 
         # Don't retry req
         if self.resp.status in const.HTTP_RETRY_ERROR_CODES:
             logger.warning(f'jj_error 4{self.ec_char}: {self.url} {self.status_text}')
-            add_errorurls(working_o, f'jj_error 4{self.ec_char}', self.status_text, False)
+            await add_errorurls(working_o, f'jj_error 4{self.ec_char}', self.status_text, False)
 
         # Retry req
         else:
             logger.warning(f'jj_error 5{self.ec_char}: request error: {self.url} {self.status_text}')
-            add_errorurls(working_o, f'jj_error 5{self.ec_char}', self.status_text, True)
+            await add_errorurls(working_o, f'jj_error 5{self.ec_char}', self.status_text, True)
 
 
     # Errors not from status code
-    def failed_req_handler(self, working_o, errex):
+    async def failed_req_handler(self, working_o, errex):
         if isinstance(errex, asyncio.TimeoutError) or isinstance(errex, TimeoutError):
             logger.warning(f'jj_error 3{self.ec_char}: Timeout {self.url}')
-            add_errorurls(working_o, f'jj_error 3{self.ec_char}', 'Timeout', True)
+            await add_errorurls(working_o, f'jj_error 3{self.ec_char}', 'Timeout', True)
 
         else:
             logger.warning(f'jj_error 6{self.ec_char}: playwright error: {errex} {self.url} {sys.exc_info()[2].tb_lineno}')
-            add_errorurls(working_o, f'jj_error 6{self.ec_char}', str(errex), True)
+            await add_errorurls(working_o, f'jj_error 6{self.ec_char}', str(errex), True)
 
 
 
@@ -384,7 +520,6 @@ class static_req(requester_base):
 
 
 
-
 # Removes extra info from urls to prevent duplicate pages from being checked more than once
 def dup_checker(url):
     url_dup = url.split('://')[1].split('#')[0]  # Remove scheme and fragments
@@ -473,28 +608,6 @@ async def get_working_o(task_id):
         await asyncio.sleep(8)
 
 
-# Choose requester based on attempt number
-def choose_requester(working_o, task_id, pw, session):
-    working_o.req_attempt_num += 1
-    try:
-        if working_o.req_attempt_num < 3:
-            return pw_req(pw, working_o)
-
-        elif working_o.req_attempt_num < 5:
-            return static_req(session, working_o)
-
-        else:
-            logger.info(f'All retries exhausted: {working_o.workingurl} {working_o.req_attempt_num}')
-            working_c.prog_count += 1
-
-    except asyncio.TimeoutError as errex:  ## not possible without wait for?
-        logger.warning(f'looper timeout __error: {errex} {working_o.workingurl}')
-        add_errorurls(working_o, 'jj_error 8', 'looper timeout', True)
-
-    except Exception as errex:
-        logger.exception(f'looper __error: {sys.exc_info()[2].tb_lineno}')
-        add_errorurls(working_o, 'jj_error 9', errex, True)
-
 
 # Request loop
 async def req_looper(pw, session):
@@ -509,23 +622,23 @@ async def req_looper(pw, session):
         if not working_o: continue
 
         # Get requester
-        req_o = choose_requester(working_o, task_id, pw, session)
+        req_o = await working_o.choose_requester(task_id, pw, session)
         if not req_o: continue
 
         try:
             await req_o.request_url()
 
             if req_o.resp.status == 200:
-                if not req_o.content_type_check(working_o): continue
+                if not await req_o.content_type_check(working_o): continue
                 await req_o.get_content()
-                if not req_o.check_vis_text(working_o): continue
+                if not await req_o.check_vis_text(working_o): continue
                 req_o.add_html(working_o)
-                req_success(working_o)
+                await req_success(working_o)
             else:
-                req_o.resp_err_handler(working_o)
+                await req_o.resp_err_handler(working_o)
 
         except Exception as errex:
-            req_o.failed_req_handler(working_o, errex)
+            await req_o.failed_req_handler(working_o, errex)
         finally:
             await req_o.close()
 
@@ -533,7 +646,7 @@ async def req_looper(pw, session):
 
 
 # After successful webpage retrieval
-def req_success(working_o):
+async def req_success(working_o):
     working_c.prog_count += 1
 
     logger.debug(f'begin robots.txt update {working_o} {bot_excluder.domain_d[working_o.dup_domain]}')
@@ -550,14 +663,14 @@ def req_success(working_o):
         return
 
     working_o.write_results()  # Write result text to file
-    crawler(working_o)  # Get more links from page
+    await working_o.crawler()  # Get more links from page
 
 
 
 
 # url: [[org name, db type, crawl level], [[error number, error desc], [error number, error desc]], [final error flag, fallback flags]]
 # Append URLs and info to the errorlog. Allows multiple errors (values) to each URL (key)
-def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
+async def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
     org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
 
     ## errorlog splits should use non printable char
@@ -580,12 +693,12 @@ def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
     # Add URL back to queue
     if back_in_q_b:
         logger.debug(f'Putting back into queue: {workingurl}')
-        #with q_lock:
-        working_c.all_urls_q.put_nowait(working_o)
+        async with q_lock:
+            working_c.all_urls_q.put_nowait(working_o)
 
     # Add final_error flag to errorlog
     else:
-        final_error(working_o)
+        await final_error(working_o)
 
     ## should this be called only on final error or success?
     # Update checked pages value to error code
@@ -593,141 +706,15 @@ def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
 
 
 # Mark final errors in errorlog
-def final_error(working_o):
+async def final_error(working_o):
     try:
         working_c.prog_count += 1
         #with err_lock:
         working_c.error_urls_d[working_o.workingurl].append(['jj_final_error'])
-        homepage_fallback(working_o)
+        await homepage_fallback(working_o)
     except Exception:
         logger.exception(f'final_e __error: {working_o.workingurl} {sys.exc_info()[2].tb_lineno}')
 
-
-# If request failed on first URL (portal), use homepage as fallback
-def homepage_fallback(working_o):
-    org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
-
-    if current_crawl_level == 0:
-        logger.info(f'Using URL fallback: {parent_url}')
-
-        # Put homepage url into queue with -1 current crawl level
-        if proceed(parent_url):
-            working_c.prog_count -= 1  ## undo progress count from final error
-            working_o.workingurl = parent_url
-            working_o.current_crawl_level = -1
-            working_o.parent_url = workingurl  ## parent of homepage fallback?
-            working_o.workingurl_dup = dup_checker(parent_url)
-            working_o.add_to_queue()
-
-
-
-# Include pagination links
-def get_pagination(working_o):
-    org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
-    domain = working_o.domain
-    soup = working_o.soup
-
-    for pag_class in soup.find_all(class_='pagination'):
-        logger.info(f'pagination class found: {workingurl}')
-        for anchor_tag in pag_class.find_all('a'):  # Find anchor tags
-            logger.info(f'anchor_tag.text {anchor_tag.text}')
-            if 'next' in anchor_tag.text.lower():  # Find "next" page url
-
-                # Add to queue
-                abspath = parse.urljoin(domain, anchor_tag.get('href'))
-                if proceed(abspath):
-                    logger.info(f'Adding pagination url: {abspath} {workingurl}')
-                    working_o.workingurl = abspath
-                    working_o.workingurl_dup = dup_checker(abspath)
-                    working_o.parent_url = workingurl
-                    working_o.add_to_queue()
-
-            ## look for next page button represented by angle bracket
-            elif '>' in anchor_tag.text: logger.debug(f'pagination angle bracket {anchor_tag.text}')
-
-
-# Find more links
-def get_links(working_o):
-    new_urls = set()
-    for anchor_tag in working_o.soup.find_all('a'):
-
-        # Widen search of jbws if only 1 url in elem. should this be recursive? ie grandparent
-        if len(anchor_tag.parent.find_all('a')) == 1:
-            tag = anchor_tag.parent
-        else:
-            tag = anchor_tag
-
-        # Newlines will mess up jbw and bunk detection
-        for br in tag.find_all("br"):
-            br.replace_with(" ")
-
-        # Skip if the tag contains a bunkword
-        if any(bunkword in str(tag).lower() for bunkword in const.BUNKWORDS):
-            #logger.debug(f'Bunk word detected: {working_o.workingurl} {str(tag)[:99]}')
-            continue
-
-        # Skip if no jobwords in content
-        ## use this for only high conf jbws
-        tag_content = str(tag.text).lower()
-        if not any(jbw in tag_content for jbw in working_o.jbws_high_conf):
-            #logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
-            continue
-
-        '''
-        ## use this for either low or high conf jbws, with new low conf format
-        if not any(ttt in tag_content for ttt in jbws_high_conf + jbws_low_conf):
-            if working_o.jbw_type == 'civ': continue
-            # Exact match only for sch and uni extra low conf jbws
-            else:
-                if not tag_content in jbws_su_x_low: continue
-        '''
-
-
-        bs_url = anchor_tag.get('href')
-        abspath = parse.urljoin(working_o.domain, bs_url).strip()  # Convert relative paths to absolute and strip whitespace
-        logger.debug(f'abspath: {abspath} {tag_content}')
-        # Remove non printed characters
-        #abspath = abspath.encode('ascii', 'ignore').decode()
-        #abspath = parse.quote(abspath)
-
-        new_urls.add(abspath)
-
-    logger.info(f'Found {len(new_urls)} new links from {working_o.workingurl}')
-    return new_urls
-
-
-# Explore html to find more links and weigh confidence
-def crawler(working_o):
-    try:
-        org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
-
-        # Remove non ascii characters, strip, percent encode
-        #red_url = red_url.encode('ascii', 'ignore').decode().strip()
-        #red_url = parse.quote(red_url, safe='/:')
-
-        # Search for pagination links before checking crawl level
-        get_pagination(working_o)
-
-        # Limit crawl level
-        if current_crawl_level > const.MAX_CRAWL_DEPTH:
-            return
-
-        logger.debug(f'Begin crawling: {workingurl}')
-        working_o.current_crawl_level += 1
-
-        # Check new URLs and append to queue
-        for abspath in get_links(working_o):
-            if proceed(abspath):
-                #new_working_o = working_c(org_name, abspath, current_crawl_level, workingurl, db_name, dup_checker(abspath), req_attempt_num)
-                working_o.workingurl = abspath
-                working_o.workingurl_dup = dup_checker(abspath)
-                working_o.parent_url = workingurl
-                working_o.add_to_queue()
-
-    except Exception as errex:
-        logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {str(traceback.format_exc())} {working_o}')
-        add_errorurls(working_o, 'jj_error 1', str(errex), True)
-        return
 
 
 
