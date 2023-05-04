@@ -18,6 +18,9 @@ use pw req obj for ping
     ping as child class of pw?
 
 refactor
+    pw and aio sessions in their req class
+    create locks in method?
+    break up clear_brows
     rename working_o to scrap? pre_req and post?
     curernt:
         add_to_queue, fallback_success, check_red, count_jbws, write_results
