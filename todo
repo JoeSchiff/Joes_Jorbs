@@ -5,6 +5,7 @@ progress lower than total at end
 
 remove "Cant append error to errorlog"?
 
+TEST LOCKS
 need locks? must convert funcs to async
 
 Todo:
