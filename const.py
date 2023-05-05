@@ -5,6 +5,12 @@ import re
 from datetime import date
 
 
+VERSION_PATH = '/home/joepers/code/jj_v3.2'
+CIV_DB_PATH = os.path.join(VERSION_PATH, 'dbs/civ_db')
+SCH_DB_PATH = os.path.join(VERSION_PATH, 'dbs/sch_db')
+UNI_DB_PATH = os.path.join(VERSION_PATH, 'dbs/uni_db')
+PUSH_RESULTS_PATH = os.path.join(VERSION_PATH, "push_results.sh")
+
 JORB_HOME_PATH = '/home/joepers/joes_jorbs'
 
 DATER_PATH = os.path.join(JORB_HOME_PATH, date.today().isoformat())
