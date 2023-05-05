@@ -80,12 +80,11 @@ auto blacklist
 respect robots
 
 
-3.2 - 10/22
+3.2 - ?
 replace prant with logging module
-implement async file writing
-async only where necessary
-refactor looper
-
+major refactor
+polymorphic requester classes. requests and error handling
+one pw browser. removed unnecessary brow restart behavior
 
 
 
