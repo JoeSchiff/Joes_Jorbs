@@ -1,7 +1,7 @@
 # Description: Crawl and scrape the visible text from NYS civil service and school webpages
 
+# Version: 3.2
 
-version_path = '/home/joepers/code/jj_v3.2'
 
 
 
@@ -32,25 +32,14 @@ startTime = datetime.now()
 
 
 
-# Dirs for results
-def make_dirs():
-    for db in const.DB_TYPES:
-        db_path = os.path.join(const.RESULTS_PATH, db)
-        if not os.path.exists(db_path):
-            os.makedirs(db_path)
 
-    # Dir for rp and autoblacklist files
-    if not os.path.exists(const.PERSISTENT_PATH):
-        os.makedirs(const.PERSISTENT_PATH)
-
-    # Dir for error 7 files
-    if not os.path.exists(const.ERR7_PATH):
-        os.makedirs(const.ERR7_PATH)
 
 
 
 # The webpage object
-class working_c:
+class scrape_c:
+    q_lock = asyncio.Lock()
+    # cml_lock = asyncio.Lock()  # 
     all_done_d = {}  # Each task states if the queue is empty
     prog_count = 0
     total_count = 0
@@ -84,7 +73,7 @@ class working_c:
         return self.org_name, self.workingurl, self.current_crawl_level, self.parent_url, self.jbw_type, self.workingurl_dup, self.req_attempt_num
 
 
-    # Add new working_o to the queue
+    # Add new working list to the queue
     async def add_to_queue(self,
         workingurl = self.workingurl,
         current_crawl_level = self.current_crawl_level,
@@ -95,41 +84,51 @@ class working_c:
         checked_urls_d_entry(self.workingurl_dup, None)  # Add new entry to CML
 
         # Create new working list: [org name, URL, crawl level, parent URL, jbw type, url_dup, req attempt]
-        new_working_o = working_c(self.org_name, workingurl, current_crawl_level, parent_url, self.jbw_type, workingurl_dup, req_attempt_num)
-        logger.debug(f'Putting list into queue: {new_working_o}')
+        new_scrap = scrape_c(self.org_name, workingurl, current_crawl_level, parent_url, self.jbw_type, workingurl_dup, req_attempt_num)
+        logger.debug(f'Putting list into queue: {new_scrap}')
         logger.debug(f'From: {self.parent_url}')
 
         # Put new working list in queue
         try:
-            async with q_lock:
-                working_c.all_urls_q.put_nowait(new_working_o)
-                working_c.total_count += 1
+            async with scrape_c.q_lock:
+                scrape_c.all_urls_q.put_nowait(new_scrap)
+                scrape_c.total_count += 1
         except Exception:
-            logger.exception(f'__Error trying to put into all_urls_q: {new_working_o}')
+            logger.exception(f'__Error trying to put into all_urls_q: {new_scrap}')
 
+
+    # Get working list from queue
+    async def get_scrap(task_id):
+        try:
+            async with scrape_c.q_lock:
+                scrap = scrape_c.all_urls_q.get_nowait()
+                scrape_c.all_done_d[task_id] = False
+            logger.debug(f'got new working_list {scrap}')
+            return scrap
+
+        except asyncio.QueueEmpty:
+            logger.info(f'queue empty')
+            scrape_c.all_done_d[task_id] = True
+            await asyncio.sleep(8)
+
+        except Exception:
+            logger.exception(f'QUEUE __ERROR:')
+            await asyncio.sleep(8)
+            
 
     # Choose requester based on attempt number
-    async def choose_requester(self, task_id, pw, session):
+    async def choose_requester(self, task_id):
         self.req_attempt_num += 1
-        try:
-            if self.req_attempt_num < 3:
-                return pw_req(pw, self)
+        
+        if self.req_attempt_num < 3:
+            return pw_req(self)
 
-            elif self.req_attempt_num < 5:
-                return static_req(session, self)
+        elif self.req_attempt_num < 5:
+            return static_req(self)
 
-            else:
-                logger.info(f'All retries exhausted: {self.workingurl} {self.req_attempt_num}')
-                working_c.prog_count += 1
-
-        except asyncio.TimeoutError as errex:  ## not possible without wait for?
-            logger.warning(f'looper timeout __error: {errex} {self.workingurl}')
-            await add_errorurls(self, 'jj_error 8', 'looper timeout', True)
-
-        except Exception as errex:
-            logger.exception(f'looper __error: {sys.exc_info()[2].tb_lineno}')
-            await add_errorurls(self, 'jj_error 9', errex, True)
-
+        else:
+            logger.info(f'All retries exhausted: {self.workingurl} {self.req_attempt_num}')
+            scrape_c.prog_count += 1
 
 
     # Mark errorlog portal url entry as successful fallback. ie: portal failed so now using homepage instead. don't count as portal error
@@ -137,10 +136,9 @@ class working_c:
         if self.current_crawl_level < 0:
             try:
                 logger.info(f'Homepage fallback success: Overwriting parent_url error: {self.parent_url}')
-                #with err_lock:
-                working_c.error_urls_d[self.parent_url][-1].append('fallback_success')
+                scrape_c.error_urls_d[self.parent_url][-1].append('fallback_success')
             except KeyError:
-                logger.exception(f'__error parent url key not in working_c.error_urls_d {self.parent_url}')
+                logger.exception(f'__error parent url key not in scrape_c.error_urls_d {self.parent_url}')
             except Exception:
                 logger.exception(f'__error:')
 
@@ -179,7 +177,7 @@ class working_c:
         logger.info(f'Using URL fallback: {self.parent_url}')
 
         if proceed(self.parent_url):
-            working_c.prog_count -= 1  ## undo progress count from final error
+            scrape_c.prog_count -= 1  ## undo progress count from final error
             await self.add_to_queue(workingurl=self.parent_url, current_crawl_level=-1, parent_url=self.workingurl, workingurl_dup=dup_checker(self.parent_url))
 
 
@@ -198,7 +196,7 @@ class working_c:
                         logger.info(f'Adding pagination url: {abspath} {self.workingurl}')
                         await self.add_to_queue(workingurl=abspath, parent_url=self.workingurl, workingurl_dup=dup_checker(abspath))
 
-                ## look for next page button represented by angle bracket
+                # look for next page button represented by angle bracket
                 elif '>' in anchor_tag.text:
                     logger.debug(f'pagination angle bracket {anchor_tag.text}')
 
@@ -293,7 +291,6 @@ class working_c:
     # Save webpage vis text to file
     def write_results(self):
 
-        ## combine this with fallback detection earlier?
         # Dont save results if this a fallback homepage
         if self.current_crawl_level < 0:
             return
@@ -321,23 +318,23 @@ class working_c:
 class requester_base:
     req_pause = False  # Tell all tasks to wait if there is no internet connectivity
 
-    def __init__(self, working_o):
-        self.url = working_o.workingurl
+    def __init__(self, scrap):
+        self.url = scrap.workingurl
 
 
     # Exclude forbidden content types. ex: pdf
-    async def content_type_check(self, working_o):
+    async def content_type_check(self, scrap):
         content_type = self.resp.headers['content-type']
         if 'text/html' in content_type:
             return True
         else:
             logger.info(f'jj_error 2{self.ec_char}: Forbidden content type: {content_type} {self.url}')
-            await add_errorurls(working_o, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
+            await add_errorurls(scrap, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
             return False
 
 
     # Check for minimum amount of content. ex soft 404
-    async def check_vis_text(self, working_o):
+    async def check_vis_text(self, scrap):
         logger.debug(f'begin check_vis_text {self.url}')
         self.vis_text = re.sub(const.WHITE_REG, " ", self.vis_text).lower()  # Reduce excess whitespace with regex
 
@@ -345,7 +342,7 @@ class requester_base:
             return True
         else:
             logger.warning(f'jj_error 7: Empty vis text: {self.url} {len(self.vis_text)}')
-            await add_errorurls(working_o, 'jj_error 7', 'Empty vis text', False)
+            await add_errorurls(scrap, 'jj_error 7', 'Empty vis text', False)
 
             # Debug err7 by saving to separate dir
             url_path = parse.quote(self.url, safe=':')
@@ -356,75 +353,68 @@ class requester_base:
             return False  # Dont retry
 
 
-    # Copy resp data to working_o
-    def add_html(self, working_o):
-        working_o.html = self.html
-        working_o.vis_text = self.vis_text
-        working_o.red_url = str(self.resp.url)  # aiohttp returns yarl obj not str
-        working_o.browser = self.name
-        working_o.soup = BeautifulSoup(self.html, 'html5lib').find('body')
+    # Copy resp data to scrap
+    def add_html(self, scrap):
+        scrap.html = self.html
+        scrap.vis_text = self.vis_text
+        scrap.red_url = str(self.resp.url)  # aiohttp returns yarl obj not str
+        scrap.browser = self.name
+        scrap.soup = BeautifulSoup(self.html, 'html5lib').find('body')
         logger.debug(f'added html: {self.url}')
 
 
     # Act on response status number
-    async def resp_err_handler(self, working_o):
+    async def resp_err_handler(self, scrap):
 
         # Don't retry req
         if self.resp.status in const.HTTP_RETRY_ERROR_CODES:
             logger.warning(f'jj_error 4{self.ec_char}: {self.url} {self.status_text}')
-            await add_errorurls(working_o, f'jj_error 4{self.ec_char}', self.status_text, False)
+            await add_errorurls(scrap, f'jj_error 4{self.ec_char}', self.status_text, False)
 
         # Retry req
         else:
             logger.warning(f'jj_error 5{self.ec_char}: request error: {self.url} {self.status_text}')
-            await add_errorurls(working_o, f'jj_error 5{self.ec_char}', self.status_text, True)
+            await add_errorurls(scrap, f'jj_error 5{self.ec_char}', self.status_text, True)
 
 
     # Errors not from status code
-    async def failed_req_handler(self, working_o, errex):
+    async def failed_req_handler(self, scrap, errex):
         if isinstance(errex, asyncio.TimeoutError) or isinstance(errex, TimeoutError):
             logger.warning(f'jj_error 3{self.ec_char}: Timeout {self.url}')
-            await add_errorurls(working_o, f'jj_error 3{self.ec_char}', 'Timeout', True)
+            await add_errorurls(scrap, f'jj_error 3{self.ec_char}', 'Timeout', True)
 
         else:
             logger.warning(f'jj_error 6{self.ec_char}: playwright error: {errex} {self.url} {sys.exc_info()[2].tb_lineno}')
-            await add_errorurls(working_o, f'jj_error 6{self.ec_char}', str(errex), True)
+            await add_errorurls(scrap, f'jj_error 6{self.ec_char}', str(errex), True)
 
+
+
+async def create_pw_vars():
+    pw_req.session = await async_playwright().start()
+    pw_req.brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
 
 
 class pw_req(requester_base):
-    session = await async_playwright().start()
-    init_pw_brows()
+    #session = await async_playwright().start()
+    #brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
+
     
-    def __init__(self, pw, working_o):
+    def __init__(self, scrap):
         self.name = 'pw'
         self.ec_char = 'a'
-        self.pw = pw
-        super().__init__(working_o)
+        super().__init__(scrap)
 
-    # Select pw browser, create context and page
-    async def get_pw_brow(self):
-        for brow in self.brow_l:
-            try:
-                self.context = await brow.new_context(ignore_https_errors=True)  ## slow execution here?
-                self.page = await self.context.new_page()
-                self.page.set_default_navigation_timeout(20000)
-                logger.debug(f'using brow: {brow._impl_obj._browser_type.name}')
-                return
-            # Remove browser from available list on error
-            except Exception:
-                logger.exception(f'error creating context or page')
-                await clear_brows(pw, brow)
 
-        # No browser available
-        else:
-            logger.warning(f'brow list empty')
-            await asyncio.sleep(4)
+    async def get_page(self):
+        self.context = await pw_req.brow.new_context(ignore_https_errors=True)  ## slow execution here?
+        self.page = await self.context.new_page()
+        self.page.set_default_navigation_timeout(20000)
+        logger.debug(f'using brow: {brow._impl_obj._browser_type.name}')
 
 
     async def request_url(self):
         logger.info(f'begin req pw {self.url}')
-        await self.get_pw_brow()
+        await self.get_page()
         self.resp = await self.page.goto(self.url)
         await self.page.wait_for_load_state('networkidle')
         self.status_text = f'{self.resp.status} {self.resp.status_text}'
@@ -472,94 +462,36 @@ class pw_req(requester_base):
             return "", ""
 
 
-
-
-    # Restart pw browsers
-    async def clear_brows(*args):
-        logger.info(f'Begin clear_brows_f {args}')
-        restart_brow_set = set()
-
-        # Manual and auto restart
-        for brow in list(args) + pw_req.brow_l:
-            if not brow.is_connected():
-                logger.warning(f'brow not connected {brow}')
-                async with brow_lock:
-                    pw_req.brow_l.remove(brow)
-                async with restart_brow_lock:
-                    restart_brow_set.add(brow)
-
-        # Restart nonworking pw browsers
-        logger.debug(f'restart_brow_set: {restart_brow_set}')
-        for brow in restart_brow_set:
-            brow_name = brow._impl_obj._browser_type.name
-
-            # Wait for tasks to depopulate the browser before closing
-            for i in range(20):
-                if len(brow.contexts) > 0:
-                    logger.debug(f'cons still open open: {brow.contexts}')
-                    await asyncio.sleep(1)
-                else:
-                    logger.info(f'Closing brow: {brow}')
-                    break
-            else:
-                logger.warning(f'brow depop timeout {brow}')
-
-            # Close original browser
-            await brow.close()
-
-            # Start replacement browsers
-            if brow_name == 'chromium':
-                logger.debug(f'starting chromium')
-                new_browser = await pw.chromium.launch(args=['--disable-gpu'])
-            elif brow_name == 'firefox':
-                logger.debug(f'starting firefox')
-                new_browser = await pw.firefox.launch()
-            else:
-                logger.error(f'__error: cant detect browser name {brow} {brow_name}')
-                continue
-
-            logger.info(f'Started new brow: {new_browser}')
-            async with brow_lock:
-                pw_req.brow_l.append(new_browser)
-
-
-
-    # Start primary and fallback pw browsers
-    async def init_pw_brows():
-        pw_req.brow_l = []  # Available pw browsers and for restarting
-        brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
-        pw_req.brow_l.append(brow)
-
-        brow = await pw_req.session.firefox.launch()
-        pw_req.brow_l.append(brow)
-
-
-
-    async def close(self):
+    async def close_page(self):
         try:
             await self.context.close()
         except Exception:
             logger.exception(f'cant close pw context')
 
+            
+    async def close_session():
+        await pw_req.session.stop()
+
+
 
 class pw_ping(pw_req):
-    def __init__(self, pw):
-        working_o = working_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com', 0)
-        super().__init__(working_o)
+    def __init__(self):
+        scrap = scrape_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com', 0)
+        super().__init__(scrap)
 
 
 
 class static_req(requester_base):
-    session = await aiohttp.ClientSession(timeout=timeout)
+    timeout = aiohttp.ClientTimeout(total=8)
+    #session = await aiohttp.ClientSession(timeout=timeout)
     
-    def __init__(self, session, working_o):
+    def __init__(self, scrap):
         self.name = 'static'
         self.ec_char = 'b'
-        self.session = session
-        super().__init__(working_o)
+        super().__init__(scrap)
 
     async def request_url(self):
-        self.resp = await self.session.get(self.url, headers={'User-Agent': const.USER_AGENT_S}, ssl=False)
+        self.resp = await static_req.session.get(self.url, headers={'User-Agent': const.USER_AGENT_S}, ssl=False)
         self.status_text = f'{self.resp.status} {self.resp.reason}'
 
 
@@ -581,7 +513,7 @@ class static_req(requester_base):
         return vis_soup.text
 
 
-    async def close(self):
+    async def close_page(self):
         if not hasattr(self, 'resp'):
             logger.warning(f'static response does not exist')
         else:
@@ -590,6 +522,9 @@ class static_req(requester_base):
             except Exception:
                 logger.exception(f'cant close static response')
 
+
+    async def close_session():
+        await static_req.session.close()
 
 
 
@@ -608,8 +543,8 @@ def dup_checker(url):
 
 # Entrypoint into CML
 def checked_urls_d_entry(url_dup, *args):
-    #with check_lock:
-    working_c.checked_urls_d[url_dup] = args
+    #async with scrape_c.cml_lock:
+    scrape_c.checked_urls_d[url_dup] = args
     logger.debug(f'Updated outcome for/with: {url_dup} {args}')
 
 
@@ -633,7 +568,7 @@ def proceed(url) -> bool:
     url_dup = dup_checker(url)
 
     # Exclude checked pages
-    if url_dup in working_c.checked_urls_d:
+    if url_dup in scrape_c.checked_urls_d:
         logger.debug(f'Skipping: {url_dup}')
         return False
 
@@ -661,117 +596,98 @@ async def check_internet_connection():
         await asyncio.sleep(4)
 
 
-# Get working list from queue
-async def get_working_o(task_id):
-    try:
-        async with q_lock:
-            working_o = working_c.all_urls_q.get_nowait()
-            working_c.all_done_d[task_id] = False
-        logger.debug(f'got new working_list {working_o}')
-        return working_o
-
-    # Empty queue
-    except asyncio.QueueEmpty:
-        logger.info(f'queue empty')
-        working_c.all_done_d[task_id] = True
-        await asyncio.sleep(8)
-
-    except Exception:
-        logger.exception(f'QUEUE __ERROR:')
-        await asyncio.sleep(8)
-
-
 
 # Request loop
-async def req_looper(pw, session):
+async def req_looper():
     task_id = asyncio.current_task().get_name()
 
-    # End looper if all tasks report empty queue
-    while not all(working_c.all_done_d.values()):
+    # End looper when all tasks report empty queue
+    while not all(scrape_c.all_done_d.values()):
         await check_internet_connection()
 
         # Get url from queue
-        working_o = await get_working_o(task_id)
-        if not working_o: continue
+        scrap = await get_scrap(task_id)
+        if not scrap: continue
 
-        # Get requester
-        req_o = await working_o.choose_requester(task_id, pw, session)
-        if not req_o: continue
+        requester = await scrap.choose_requester(task_id)
+        if not requester: continue
 
         try:
-            await req_o.request_url()
+            await requester.request_url()
 
-            if req_o.resp.status == 200:
-                if not await req_o.content_type_check(working_o): continue
-                await req_o.get_content()
-                if not await req_o.check_vis_text(working_o): continue
-                req_o.add_html(working_o)
-                await req_success(working_o)
+            if requester.resp.status == 200:
+                if not await requester.content_type_check(scrap): continue
+                await requester.get_content()
+                if not await requester.check_vis_text(scrap): continue
+                requester.add_html(scrap)
+                await req_success(scrap)
             else:
-                await req_o.resp_err_handler(working_o)
+                await requester.resp_err_handler(scrap)
+
+        except asyncio.TimeoutError as errex:  ## not possible without wait for?
+            logger.warning(f'looper timeout __error: {errex} {self.workingurl}')
+            await add_errorurls(self, 'jj_error 8', 'looper timeout', True)
 
         except Exception as errex:
-            await req_o.failed_req_handler(working_o, errex)
+            await requester.failed_req_handler(scrap, errex)
         finally:
-            await req_o.close()
+            await requester.close_page()
 
-    logger.info(f'Task complete:')  # All tasks complete
+    logger.info(f'Task complete: {task_id}')
 
 
 # After successful webpage retrieval
-async def req_success(working_o):
-    working_c.prog_count += 1
+async def req_success(scrap):
+    scrape_c.prog_count += 1
 
-    logger.debug(f'begin robots.txt update {working_o} {bot_excluder.domain_d[working_o.dup_domain]}')
-    bot_excluder.domain_d[working_o.dup_domain].update()  # Inc domain_count
+    logger.debug(f'begin robots.txt update {scrap} {bot_excluder.domain_d[scrap.dup_domain]}')
+    bot_excluder.domain_d[scrap.dup_domain].update()  # Inc domain_count
 
-    logger.debug(f'begin fallback_success {working_o}')
-    working_o.fallback_success()  # Check and update fallback
+    logger.debug(f'begin fallback_success {scrap}')
+    scrap.fallback_success()  # Check and update fallback
 
-    working_o.count_jbws()
-    checked_urls_d_entry(working_o.workingurl_dup, working_o.jbw_count, working_o.browser)  # Update outcome in working_c.checked_urls_d
+    scrap.count_jbws()
+    checked_urls_d_entry(scrap.workingurl_dup, scrap.jbw_count, scrap.browser)  # Update outcome in scrape_c.checked_urls_d
 
-    logger.debug(f'begin check_red {working_o}')
-    if not working_o.check_red():  # Check if redirect URL has been processed already
+    logger.debug(f'begin check_red {scrap}')
+    if not scrap.check_red():  # Check if redirect URL has been processed already
         return
 
-    working_o.write_results()  # Write result text to file
-    await working_o.crawler()  # Get more links from page
+    scrap.write_results()  # Write result text to file
+    await scrap.crawler()  # Get more links from page
 
 
 
 
 # url: [[org name, db type, crawl level], [[error number, error desc], [error number, error desc]], [final error flag, fallback flags]]
 # Append URLs and info to the errorlog. Allows multiple errors (values) to each URL (key)
-async def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
-    org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = working_o.clean_return()
+async def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
+    org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = scrap.clean_return()
 
     ## errorlog splits should use non printable char
     # Remove commas from text to prevent splitting errors when reading errorlog
-    err_desc = err_desc.replace(',', '').strip()
+    #err_desc = err_desc.replace(',', '').strip()  ## unn
 
     # First error for this url
-    if not workingurl in working_c.error_urls_d:
-        #with err_lock:
-        working_c.error_urls_d[workingurl] = [[org_name, jbw_type, current_crawl_level], [[err_desc, err_code]]]
+    if not workingurl in scrape_c.error_urls_d:
+        scrape_c.error_urls_d[workingurl] = [[org_name, jbw_type, current_crawl_level], [[err_desc, err_code]]]
 
     # Not the first error for this url
     else:
         try:
-            #with err_lock:
-            working_c.error_urls_d[workingurl][1].append([err_desc, err_code])
+            scrape_c.error_urls_d[workingurl][1].append([err_desc, err_code])
         except Exception:
             logger.exception(f'Cant append error to errorlog: {workingurl}')
 
     # Add URL back to queue
     if back_in_q_b:
         logger.debug(f'Putting back into queue: {workingurl}')
-        async with q_lock:
-            working_c.all_urls_q.put_nowait(working_o)
+        async with scrape_c.q_lock:
+            scrape_c.all_urls_q.put_nowait(scrap)
 
     # Add final_error flag to errorlog
     else:
-        await final_error(working_o)
+        await final_error(scrap)
 
     ## should this be called only on final error or success?
     # Update checked pages value to error code
@@ -779,14 +695,13 @@ async def add_errorurls(working_o, err_code, err_desc, back_in_q_b):
 
 
 # Mark final errors in errorlog
-async def final_error(working_o):
+async def final_error(scrap):
     try:
-        working_c.prog_count += 1
-        #with err_lock:
-        working_c.error_urls_d[working_o.workingurl].append(['jj_final_error'])
-        await homepage_fallback(working_o)
+        scrape_c.prog_count += 1
+        scrape_c.error_urls_d[scrap.workingurl].append(['jj_final_error'])
+        await homepage_fallback(scrap)
     except Exception:
-        logger.exception(f'final_e __error: {working_o.workingurl} {sys.exc_info()[2].tb_lineno}')
+        logger.exception(f'final_e __error: {scrap.workingurl} {sys.exc_info()[2].tb_lineno}')
 
 
 
@@ -798,12 +713,10 @@ async def ping_test():
     while True:
         try:
             logger.debug(f'pw ping begin')
-            ping_o = pw_ping()
-            await ping_o.request_url()
-            if ping_o.resp.status == 200:
-
-            # Success
-            if resp.status == 200:
+            ping_requester = pw_ping()
+            await ping_requester.request_url()
+            
+            if ping_requester.resp.status == 200:
                 requester_base.req_pause = False
                 logger.debug(f'pw ping success')
                 return
@@ -816,14 +729,14 @@ async def ping_test():
 
         finally:
             try:
-                await ping_o.close()
+                await ping_requester.close_page()
             except Exception:
                 logger.exception(f'ping: could not close context')
 
         # Attempt Bash ping on PW failure
         bash_ping_ret = await bash_ping()
 
-        ## restart pw not nic if bash succeeds but pw fails
+        ## should restart pw not nic if bash succeeds but pw fails
         # Restart network interface on any two errors
         if ping_tally > 1 or bash_ping_ret != 0:
             logger.debug(f'check these {ping_tally} {bash_ping_ret}')
@@ -889,13 +802,13 @@ async def restart_nic():
 async def save_progress():
     logger.debug(f'begin prog save')
     try:
-        # Pickle queue of working_os
-        async with q_lock:
+        # Pickle queue of scraps
+        async with scrape_c.q_lock:  ## unn?
             with open(const.QUEUE_PATH, "wb") as f:
-                pickle.dump(working_c.all_urls_q, f)
+                pickle.dump(scrape_c.all_urls_q, f)
 
         # CML, errorlog, and multiorg
-        for each_path, each_dict in (const.CHECKED_PATH, working_c.checked_urls_d), (const.ERROR_PATH, working_c.error_urls_d), (const.MULTI_ORG_D_PATH, working_c.multi_org_d):
+        for each_path, each_dict in (const.CHECKED_PATH, scrape_c.checked_urls_d), (const.ERROR_PATH, scrape_c.error_urls_d), (const.MULTI_ORG_D_PATH, scrape_c.multi_org_d):
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
     except Exception:
@@ -903,30 +816,27 @@ async def save_progress():
     logger.debug(f'prog save success')
 
 
-# Restart primary pw browser when mem usage is high
 async def check_mem():
-    if psutil.virtual_memory()[2] > 50:
-        logger.error(f'Memory usage too high. Restarting browser: {pw_req.brow_l[0]}')
-        #await clear_brows(pw, pw_req.brow_l[0])
+    mem_use = psutil.virtual_memory()[2]
+    logger.info(f'Memory usage: {mem_use}')
+    if mem_use > 70:
+        logger.error(f'\n Memory usage too high \n')
 
 
 # Display progress
 def display_prog():
-    logger.info(f'\nProgress: {working_c.prog_count} of {working_c.total_count}')
-    logger.info(f'mem use: {psutil.virtual_memory()[2]}')
-    for t_brow in pw_req.brow_l:
-        for t_con in t_brow.contexts:
-            logger.info(f'{t_brow._impl_obj._browser_type.name} open pages: {len(t_con.pages)} {t_con.pages}')
+    logger.info(f'\nProgress: {scrape_c.prog_count} of {scrape_c.total_count}')
+    for context in pw_req.brow.contexts:
+        logger.info(f'{pw_req.brow._impl_obj._browser_type.name} open pages: {len(context.pages)} {context.pages}')
     logger.info(f'running tasks: {len(asyncio.all_tasks())}')
     #prant('running tasks:', asyncio.all_tasks())
-    logger.info(f'len(pw_req.brow_l): {len(pw_req.brow_l)}')
 
 
 # Start async tasks
-async def run_scraper(pw, session):
+async def run_scraper():
     for i in range(const.SEMAPHORE):
-        task = asyncio.create_task(req_looper(pw, session))
-        working_c.all_done_d[task.get_name()] = False
+        task = asyncio.create_task(req_looper())
+        scrape_c.all_done_d[task.get_name()] = False
 
 
 # Run housekeeping funcs and display progress
@@ -946,38 +856,37 @@ async def maintenance():
 async def main():
     logger.info(f'\n Program Start')
 
-    # Start Playwright and aiohttp
-    timeout = aiohttp.ClientTimeout(total=8)
-    async with async_playwright() as pw, aiohttp.ClientSession(timeout=timeout) as session:
+    await run_scraper()
 
-        await run_scraper(pw, session)
+    # Wait for scraping to finish
+    while not all(scrape_c.all_done_d.values()):
+        await maintenance()
 
-        # Wait for scraping to finish
-        while not all(working_c.all_done_d.values()):
-            await maintenance()
-
-        # Scrape complete
-        logger.info(f'  Scrape complete  '.center(70, '='))
-        await cleanup()
+    # Scrape complete
+    logger.info(f'  Scrape complete  '.center(70, '='))
+    await cleanup()
 
 
-# Close pw browsers
+# Close browser sessions
 async def cleanup():
     try:
-        for brow in pw_req.brow_l:
-            await brow.close()
+        await pw_req.brow.close()
     except Exception:
         logger.exception(f'\ncant close pw brow')
 
-
-
+    for req_class in requester_base.__subclasses__():
+        try:
+            await req_class.close_session()
+        except Exception:
+            logger.exception(f'\ncant close session: {req_class.__name__}')
 
 
 
 # robots.txt and domain tracker used for rate limiting
+# robots.txts are requested before any url from that domain enter the queue
 class bot_excluder:
     import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context  ## rp.read req can throw error
+    ssl._create_default_https_context = ssl._create_unverified_context  # rp.read req can throw error
     domain_d = {}  # Holds all robots.txts
 
     @timeout_decorator.timeout(8)
@@ -1038,42 +947,43 @@ class bot_excluder:
             return False
 
 
-
-# Reuse old robots.txts. If sucessful this will populate bot_excluder.domain_d
-def read_rp_file():
-    bot_excluder.domain_d = {}  # Default to empty
-    try:
-        with open(const.RP_PATH, 'rb') as rp_file:
-            rp_d = pickle.load(rp_file)
-            check_rp_file_expiration(rp_d)
-    except Exception:
-        logger.exception(f'RP file read failed:')
-
-
-def check_rp_file_expiration(rp_d):
-    # Get time robots.txt was fetched
-    for i in rp_d.values():
-        ts = i.rp.mtime()
-        if ts: break
-    else:
-        logger.error('Error: cant recover any rp timestamp')
-        return
-
-    if datetime.now() - datetime.fromtimestamp(ts) > timedelta(days=const.RP_EXPIRATION_DAYS):
-        logger.warning(f'rp_file outdated: {datetime.fromtimestamp(ts).isoformat()}')
-    else:
-        logger.info(f'rp_file still valid: {datetime.fromtimestamp(ts).isoformat()}')
-        bot_excluder.domain_d = rp_d
+    # Reuse old robots.txts to populate bot_excluder.domain_d
+    def read_file():
+        bot_excluder.domain_d = {}  # Default to empty
+        try:
+            with open(const.RP_PATH, 'rb') as rp_file:
+                rp_d = pickle.load(rp_file)
+                if bot_excluder.check_file_expiration(rp_d):
+                    bot_excluder.domain_d = rp_d
+        except Exception:
+            logger.exception(f'RP file read failed:')
 
 
-# Write robots.txts to file
-def write_rp_file():
-    with open(const.RP_PATH, 'wb') as rp_file:
-        pickle.dump(bot_excluder.domain_d, rp_file)
-    logger.info(f'RP file written')
-    
+    def check_file_expiration(rp_d):
+        # Get time robots.txt was fetched
+        for i in rp_d.values():
+            ts = i.rp.mtime()
+            if ts: break
+        else:
+            logger.error('Error: cant recover any rp timestamp')
+            return
+
+        if datetime.now() - datetime.fromtimestamp(ts) > timedelta(days=const.RP_EXPIRATION_DAYS):
+            logger.warning(f'rp_file outdated')
+        else:
+            logger.info(f'rp_file still valid')
+            return True
+
+    # Save this immediately because robots.txts expire and it's slow to req them all
+    def write_file():
+        with open(const.RP_PATH, 'wb') as rp_file:
+            pickle.dump(bot_excluder.domain_d, rp_file)
+        logger.info(f'RP file written')
+
+
 
 class blacklist_c:
+    
     # Combine recurring errors file and static blacklist
     def __init__(self):
         try:
@@ -1111,29 +1021,44 @@ class blacklist_c:
             json.dump(self.auto_blacklist_d, f, indent=2)
 
 
+# Dirs for results
+def make_dirs():
+    for db in const.DB_TYPES:
+        db_path = os.path.join(const.RESULTS_PATH, db)
+        if not os.path.exists(db_path):
+            os.makedirs(db_path)
+
+    # Dir for rp and autoblacklist files
+    if not os.path.exists(const.PERSISTENT_PATH):
+        os.makedirs(const.PERSISTENT_PATH)
+
+    # Dir for error 7 files
+    if not os.path.exists(const.ERR7_PATH):
+        os.makedirs(const.ERR7_PATH)
+        
 
 # Resume by reading saved objs
 def recover_prog():
     # pickle queue of class objs
     with open(const.QUEUE_PATH, "rb") as f:
-        working_c.all_urls_q = pickle.load(f)
-
+        scrape_c.all_urls_q = pickle.load(f)
+    scrape_c.total_count = scrape_c.all_urls_q.qsize()
+    
     # errorlog as dict
     with open(const.ERROR_PATH, "r") as f:
-        working_c.error_urls_d = json.load(f)
+        scrape_c.error_urls_d = json.load(f)
     logger.info(f'errorlog recovery complete')
 
     # CML as dict
     with open(const.CHECKED_PATH, "r") as f:
-        working_c.checked_urls_d = json.load(f)
+        scrape_c.checked_urls_d = json.load(f)
     logger.info(f'CML recovery complete')
 
-    # working_c.multi_org_d as dict
+    # multi_org_d as dict
     with open(const.MULTI_ORG_D_PATH, "r") as f:
-        working_c.multi_org_d = json.load(f)
-    logger.info(f'working_c.multi_org_d recovery complete')
+        scrape_c.multi_org_d = json.load(f)
+    logger.info(f'scrape_c.multi_org_d recovery complete')
 
-    working_c.total_count = working_c.all_urls_q.qsize()
     logger.info(f'Progress recovery successful')
 
 
@@ -1141,26 +1066,26 @@ def recover_prog():
 def start_fresh():
     logger.info(f'Using an original queue')
 
-    working_c.checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
-    working_c.error_urls_d = {}  # URLs that have resulted in an error
-    working_c.multi_org_d = {'civ': {}, 'sch': {}, 'uni': {}}  # Nested dicts for multiple orgs covered by a URL
-    working_c.all_urls_q = asyncio.Queue()
+    scrape_c.checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
+    scrape_c.error_urls_d = {}  # URLs that have resulted in an error
+    scrape_c.multi_org_d = {'civ': {}, 'sch': {}, 'uni': {}}  # Nested dicts for multiple orgs covered by a URL
+    scrape_c.all_urls_q = asyncio.Queue()
 
     civ_db, sch_db, uni_db = read_dbs()
 
     for db, db_label in (civ_db, 'civ'), (sch_db, 'sch'), (uni_db, 'uni'):
         init_queue(db, db_label)
 
-    working_c.total_count = working_c.all_urls_q.qsize()
+    scrape_c.total_count = scrape_c.all_urls_q.qsize()
 
 
 # Get starting urls from file
 def read_dbs():
-    with open(os.path.join(version_path, 'dbs/civ_db'), 'r') as f:
+    with open(const.CIV_DB_PATH, 'r') as f:
         civ_db = json.load(f)
-    with open(os.path.join(version_path, 'dbs/sch_db'), 'r') as f:
+    with open(const.SCH_DB_PATH, 'r') as f:
         sch_db = json.load(f)
-    with open(os.path.join(version_path, 'dbs/uni_db'), 'r') as f:
+    with open(const.UNI_DB_PATH, 'r') as f:
         uni_db = json.load(f)
 
     # Testing purposes
@@ -1190,29 +1115,22 @@ def init_queue(db, db_label):
 
         # If that url is already in queue then mark it as multi org. After scraper copy results to all other orgs using that url
         try:
-            working_c.multi_org_d[db_label][url_dup].append(org_name)  # Not first org using this URL
+            scrape_c.multi_org_d[db_label][url_dup].append(org_name)  # Not first org using this URL
             logger.debug(f'Putting in multi org dict: {em_url}')
         except KeyError:
-            working_c.multi_org_d[db_label][url_dup] = [org_name]  # First org using this URL
+            scrape_c.multi_org_d[db_label][url_dup] = [org_name]  # First org using this URL
 
             # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
-            working_o = working_c(org_name, em_url, 0, homepage, db_label, url_dup, 0)
+            scrap = scrape_c(org_name, em_url, 0, homepage, db_label, url_dup, 0)
             proceed(em_url)  # respect robots.txt
-            working_c.all_urls_q.put_nowait(working_o)
-
-
-
-
-
-
+            scrape_c.all_urls_q.put_nowait(scrap)
 
 
 
 # Convert CML and errorlog to pretty format that can be read by humans and json
-def make_human_readable(in_dict, path):
-    ## this prevents resumption because json converts None to null: NameError: name 'null' is not defined
+def make_human_readable(arg_dict, path):
     text = '{\n'
-    for k, v in in_dict.items(): text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n' # json uses double quotes
+    for k, v in arg_dict.items(): text += json.dumps(k) + ': ' + json.dumps(v) + ',\n\n' # json uses double quotes
     text = text[:-3] # Remove trailing newlines and comma
     text += '\n}'
     with open(path, 'w', encoding='utf8') as out_file:
@@ -1222,16 +1140,16 @@ def make_human_readable(in_dict, path):
 # Stop timer and display stats
 def display_stats():
     duration = datetime.now() - startTime
-    logger.info(f'\n\nPages checked = {len(working_c.checked_urls_d)}')
+    logger.info(f'\n\nPages checked = {len(scrape_c.checked_urls_d)}')
     logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
-    logger.info(f'Pages/sec/tasks = {str((len(working_c.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
+    logger.info(f'Pages/sec/tasks = {str((len(scrape_c.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
 
 
 # Allow one URL to cover multiple orgs
 def multi_org_copy():
     file_count = 0
     org_count = 0
-    for db_type, url_d in working_c.multi_org_d.items():
+    for db_type, url_d in scrape_c.multi_org_d.items():
         for url, org_names_l in url_d.items():
 
             # URL is used by more than one org
@@ -1308,10 +1226,8 @@ def fallback_old_copy():
 
 # Copy results to remote server using bash
 def send_to_server():
-    cmd_proc = subprocess.run(os.path.join(version_path, "push_results.sh"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    cmd_proc = subprocess.run(const.PUSH_RESULTS_PATH, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     logging.info(cmd_proc.stdout)
-
-
 
 
 
@@ -1353,29 +1269,23 @@ def uncaught_handler(exctype, value, tb):
 
 
 
-# Locks
-q_lock = asyncio.Lock()
-brow_lock = asyncio.Lock()
-restart_brow_lock = asyncio.Lock()
-err_lock = asyncio.Lock()
-check_lock = asyncio.Lock()
-
-
 
 
 if __name__ == '__main__':
     make_dirs()
     config_logger()
     blacklist_o = blacklist_c()
-    read_rp_file()
+    bot_excluder.read_file()
 
     # Resume scraping using leftover results from the previously failed scraping attempt
     try:
         recover_prog()
     # Use original queue on any resumption error
     except Exception as errex:
+        logger.info(f'{errex}')
         start_fresh()
-    write_rp_file()  ## call this after scraper or immediatly after rp gets updated?
+        
+    bot_excluder.write_file()  ## call this after scraper or immediatly after rp gets updated?
 
     asyncio.run(main(), debug=False)
 
@@ -1387,8 +1297,8 @@ if __name__ == '__main__':
 
     import err_parse
     blacklist_o.update_auto_blacklist()
-    make_human_readable(working_c.checked_urls_d, const.CHECKED_PATH)
-    make_human_readable(working_c.error_urls_d, const.ERROR_PATH)
+    make_human_readable(scrape_c.checked_urls_d, const.CHECKED_PATH)
+    make_human_readable(scrape_c.error_urls_d, const.ERROR_PATH)
 
 
 
