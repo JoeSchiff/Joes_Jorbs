@@ -5,7 +5,6 @@ progress lower than total at end
 
 remove "Cant append error to errorlog"?
 
-remove unn locks +
 
 Todo:
 recover q loses all working urls. keep track of current urls being requested and combine with q prior to writing to file?
@@ -53,10 +52,12 @@ results.py to do:
     wraparound text for mobile?
     no error will be displayed if failed to read vis text file
 
-remove?
+remove
+    remove locks + operations are atomic, race condition not possible
+    scrap.browser: only used for cml and file contents. should be requester not browser
     multiorg: results.py doesnt show duplicate urls
     CML
-    clear_brows, brow_l: only 1 brow needed since pw stable
+    clear_brows, brow_l: only 1 brow needed since pw stable +
     bash_ping, restart_nic
 
 logging module
