@@ -5,10 +5,10 @@ progress lower than total at end
 
 remove "Cant append error to errorlog"?
 
-TEST LOCKS
-need locks? must convert funcs to async
+remove unn locks +
 
 Todo:
+recover q loses all working urls. keep track of current urls being requested and combine with q prior to writing to file?
 rewrite errorlog. with logging?
     class inst to be more descriptive?
     init with empty lists?
