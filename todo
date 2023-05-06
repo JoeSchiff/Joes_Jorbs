@@ -14,34 +14,29 @@ rewrite errorlog. with logging?
     put all minor errors into new jj error
     cml_text = '{\n'
 
-use pw req obj for ping
-    ping as child class of pw?
+use pw req obj for ping +
+    ping as child class of pw +
 
 refactor
-    pw and aio sessions in their req class
-    create locks in method?
-    break up clear_brows
+    pw and aio sessions in their req class +
     rename working_o to scrap? pre_req and post?
     curernt:
         add_to_queue, fallback_success, check_red, count_jbws, write_results
     funcs can be methods:
         choose_requester+, req_success, add_errorurls, final_error, homepage_fallback+, get_pagination+, get_links+, crawler+
     back_in_q_b as sep func?
-    pass q, err log etc or make working_o class var?
-    clean return unn?  useful for adding new workingo to queue
     results.py and index
 
 
 results.py to do:
-    test {e<=0}
+    test {e<=0} +
     remove from import
     dict or class for res_list
-    reg_res = None
     why browser in each results file?
     move zips out of file +
     reconsider skipping geodesic with high max_dist
     remove zip_form? display purposes only. keep
-        why send coords from form?
+        why send coords from form? prevents double lookup
     show jj_error num in tooltip on error tabs?
     improve code comments
     optimise: two separate sections. one with geolimter function
