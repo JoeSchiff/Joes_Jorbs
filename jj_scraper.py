@@ -38,8 +38,6 @@ startTime = datetime.now()
 
 # The webpage object
 class scrape_c:
-    q_lock = asyncio.Lock()
-    # cml_lock = asyncio.Lock()  # 
     all_done_d = {}  # Each task states if the queue is empty
     prog_count = 0
     total_count = 0
@@ -74,7 +72,7 @@ class scrape_c:
 
 
     # Add new working list to the queue
-    async def add_to_queue(self,
+    def add_to_queue(self,
         workingurl = self.workingurl,
         current_crawl_level = self.current_crawl_level,
         parent_url = self.parent_url,
@@ -90,9 +88,8 @@ class scrape_c:
 
         # Put new working list in queue
         try:
-            async with scrape_c.q_lock:
-                scrape_c.all_urls_q.put_nowait(new_scrap)
-                scrape_c.total_count += 1
+            scrape_c.all_urls_q.put_nowait(new_scrap)
+            scrape_c.total_count += 1
         except Exception:
             logger.exception(f'__Error trying to put into all_urls_q: {new_scrap}')
 
@@ -100,9 +97,8 @@ class scrape_c:
     # Get working list from queue
     async def get_scrap(task_id):
         try:
-            async with scrape_c.q_lock:
-                scrap = scrape_c.all_urls_q.get_nowait()
-                scrape_c.all_done_d[task_id] = False
+            scrap = scrape_c.all_urls_q.get_nowait()
+            scrape_c.all_done_d[task_id] = False
             logger.debug(f'got new working_list {scrap}')
             return scrap
 
@@ -117,7 +113,7 @@ class scrape_c:
             
 
     # Choose requester based on attempt number
-    async def choose_requester(self, task_id):
+    def choose_requester(self, task_id):
         self.req_attempt_num += 1
         
         if self.req_attempt_num < 3:
@@ -170,7 +166,7 @@ class scrape_c:
 
 
     # If request failed on first URL (portal), use homepage as fallback
-    async def homepage_fallback(self):
+    def homepage_fallback(self):
         if self.current_crawl_level != 0:
             return
 
@@ -178,12 +174,12 @@ class scrape_c:
 
         if proceed(self.parent_url):
             scrape_c.prog_count -= 1  ## undo progress count from final error
-            await self.add_to_queue(workingurl=self.parent_url, current_crawl_level=-1, parent_url=self.workingurl, workingurl_dup=dup_checker(self.parent_url))
+            self.add_to_queue(workingurl=self.parent_url, current_crawl_level=-1, parent_url=self.workingurl, workingurl_dup=dup_checker(self.parent_url))
 
 
 
     # Include pagination links
-    async def get_pagination(self):
+    def get_pagination(self):
         for pag_class in self.soup.find_all(class_='pagination'):
             logger.info(f'pagination class found: {self.workingurl}')
             for anchor_tag in pag_class.find_all('a'):  # Find anchor tags
@@ -194,7 +190,7 @@ class scrape_c:
                     abspath = parse.urljoin(self.domain, anchor_tag.get('href'))
                     if proceed(abspath):
                         logger.info(f'Adding pagination url: {abspath} {self.workingurl}')
-                        await self.add_to_queue(workingurl=abspath, parent_url=self.workingurl, workingurl_dup=dup_checker(abspath))
+                        self.add_to_queue(workingurl=abspath, parent_url=self.workingurl, workingurl_dup=dup_checker(abspath))
 
                 # look for next page button represented by angle bracket
                 elif '>' in anchor_tag.text:
@@ -252,10 +248,10 @@ class scrape_c:
 
 
     # Explore html to find more links and weigh confidence
-    async def crawler(self):
+    def crawler(self):
         try:
             # Search for pagination links before checking crawl level
-            await get_pagination(self)
+            get_pagination(self)
 
             # Limit crawl level
             if self.current_crawl_level > const.MAX_CRAWL_DEPTH:
@@ -267,11 +263,11 @@ class scrape_c:
             # Check new URLs and append to queue
             for abspath in get_links(self):
                 if proceed(abspath):
-                    await self.add_to_queue(workingurl=abspath, workingurl_dup=dup_checker(abspath), parent_url=self.workingurl)
+                    self.add_to_queue(workingurl=abspath, workingurl_dup=dup_checker(abspath), parent_url=self.workingurl)
 
         except Exception as errex:
             logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {str(traceback.format_exc())} {self}')
-            await add_errorurls(self, 'jj_error 1', str(errex), True)
+            add_errorurls(self, 'jj_error 1', str(errex), True)
             return
 
 
@@ -323,18 +319,18 @@ class requester_base:
 
 
     # Exclude forbidden content types. ex: pdf
-    async def content_type_check(self, scrap):
+    def content_type_check(self, scrap):
         content_type = self.resp.headers['content-type']
         if 'text/html' in content_type:
             return True
         else:
             logger.info(f'jj_error 2{self.ec_char}: Forbidden content type: {content_type} {self.url}')
-            await add_errorurls(scrap, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
+            add_errorurls(scrap, f'jj_error 2{self.ec_char}', 'Forbidden content type', False)
             return False
 
 
     # Check for minimum amount of content. ex soft 404
-    async def check_vis_text(self, scrap):
+    def check_vis_text(self, scrap):
         logger.debug(f'begin check_vis_text {self.url}')
         self.vis_text = re.sub(const.WHITE_REG, " ", self.vis_text).lower()  # Reduce excess whitespace with regex
 
@@ -342,7 +338,7 @@ class requester_base:
             return True
         else:
             logger.warning(f'jj_error 7: Empty vis text: {self.url} {len(self.vis_text)}')
-            await add_errorurls(scrap, 'jj_error 7', 'Empty vis text', False)
+            add_errorurls(scrap, 'jj_error 7', 'Empty vis text', False)
 
             # Debug err7 by saving to separate dir
             url_path = parse.quote(self.url, safe=':')
@@ -364,41 +360,35 @@ class requester_base:
 
 
     # Act on response status number
-    async def resp_err_handler(self, scrap):
+    def resp_err_handler(self, scrap):
 
         # Don't retry req
         if self.resp.status in const.HTTP_RETRY_ERROR_CODES:
             logger.warning(f'jj_error 4{self.ec_char}: {self.url} {self.status_text}')
-            await add_errorurls(scrap, f'jj_error 4{self.ec_char}', self.status_text, False)
+            add_errorurls(scrap, f'jj_error 4{self.ec_char}', self.status_text, False)
 
         # Retry req
         else:
             logger.warning(f'jj_error 5{self.ec_char}: request error: {self.url} {self.status_text}')
-            await add_errorurls(scrap, f'jj_error 5{self.ec_char}', self.status_text, True)
+            add_errorurls(scrap, f'jj_error 5{self.ec_char}', self.status_text, True)
 
 
     # Errors not from status code
-    async def failed_req_handler(self, scrap, errex):
+    def failed_req_handler(self, scrap, errex):
         if isinstance(errex, asyncio.TimeoutError) or isinstance(errex, TimeoutError):
             logger.warning(f'jj_error 3{self.ec_char}: Timeout {self.url}')
-            await add_errorurls(scrap, f'jj_error 3{self.ec_char}', 'Timeout', True)
+            add_errorurls(scrap, f'jj_error 3{self.ec_char}', 'Timeout', True)
 
         else:
             logger.warning(f'jj_error 6{self.ec_char}: playwright error: {errex} {self.url} {sys.exc_info()[2].tb_lineno}')
-            await add_errorurls(scrap, f'jj_error 6{self.ec_char}', str(errex), True)
+            add_errorurls(scrap, f'jj_error 6{self.ec_char}', str(errex), True)
 
-
-
-async def create_pw_vars():
-    pw_req.session = await async_playwright().start()
-    pw_req.brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
 
 
 class pw_req(requester_base):
     #session = await async_playwright().start()
-    #brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
+    #brow = await session.chromium.launch(args=['--disable-gpu'])
 
-    
     def __init__(self, scrap):
         self.name = 'pw'
         self.ec_char = 'a'
@@ -409,7 +399,7 @@ class pw_req(requester_base):
         self.context = await pw_req.brow.new_context(ignore_https_errors=True)  ## slow execution here?
         self.page = await self.context.new_page()
         self.page.set_default_navigation_timeout(20000)
-        logger.debug(f'using brow: {brow._impl_obj._browser_type.name}')
+        logger.debug(f'using brow: {pw_req.brow._impl_obj._browser_type.name}')
 
 
     async def request_url(self):
@@ -482,8 +472,6 @@ class pw_ping(pw_req):
 
 
 class static_req(requester_base):
-    timeout = aiohttp.ClientTimeout(total=8)
-    #session = await aiohttp.ClientSession(timeout=timeout)
     
     def __init__(self, scrap):
         self.name = 'static'
@@ -543,7 +531,6 @@ def dup_checker(url):
 
 # Entrypoint into CML
 def checked_urls_d_entry(url_dup, *args):
-    #async with scrape_c.cml_lock:
     scrape_c.checked_urls_d[url_dup] = args
     logger.debug(f'Updated outcome for/with: {url_dup} {args}')
 
@@ -609,27 +596,27 @@ async def req_looper():
         scrap = await get_scrap(task_id)
         if not scrap: continue
 
-        requester = await scrap.choose_requester(task_id)
+        requester = scrap.choose_requester(task_id)
         if not requester: continue
 
         try:
             await requester.request_url()
 
             if requester.resp.status == 200:
-                if not await requester.content_type_check(scrap): continue
+                if not requester.content_type_check(scrap): continue
                 await requester.get_content()
-                if not await requester.check_vis_text(scrap): continue
+                if not requester.check_vis_text(scrap): continue
                 requester.add_html(scrap)
-                await req_success(scrap)
+                req_success(scrap)
             else:
-                await requester.resp_err_handler(scrap)
+                requester.resp_err_handler(scrap)
 
         except asyncio.TimeoutError as errex:  ## not possible without wait for?
             logger.warning(f'looper timeout __error: {errex} {self.workingurl}')
-            await add_errorurls(self, 'jj_error 8', 'looper timeout', True)
+            add_errorurls(self, 'jj_error 8', 'looper timeout', True)
 
         except Exception as errex:
-            await requester.failed_req_handler(scrap, errex)
+            requester.failed_req_handler(scrap, errex)
         finally:
             await requester.close_page()
 
@@ -637,7 +624,7 @@ async def req_looper():
 
 
 # After successful webpage retrieval
-async def req_success(scrap):
+def req_success(scrap):
     scrape_c.prog_count += 1
 
     logger.debug(f'begin robots.txt update {scrap} {bot_excluder.domain_d[scrap.dup_domain]}')
@@ -654,14 +641,14 @@ async def req_success(scrap):
         return
 
     scrap.write_results()  # Write result text to file
-    await scrap.crawler()  # Get more links from page
+    scrap.crawler()  # Get more links from page
 
 
 
 
 # url: [[org name, db type, crawl level], [[error number, error desc], [error number, error desc]], [final error flag, fallback flags]]
 # Append URLs and info to the errorlog. Allows multiple errors (values) to each URL (key)
-async def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
+def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
     org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num = scrap.clean_return()
 
     ## errorlog splits should use non printable char
@@ -682,12 +669,11 @@ async def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
     # Add URL back to queue
     if back_in_q_b:
         logger.debug(f'Putting back into queue: {workingurl}')
-        async with scrape_c.q_lock:
-            scrape_c.all_urls_q.put_nowait(scrap)
+        scrape_c.all_urls_q.put_nowait(scrap)
 
     # Add final_error flag to errorlog
     else:
-        await final_error(scrap)
+        final_error(scrap)
 
     ## should this be called only on final error or success?
     # Update checked pages value to error code
@@ -695,16 +681,22 @@ async def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
 
 
 # Mark final errors in errorlog
-async def final_error(scrap):
+def final_error(scrap):
     try:
         scrape_c.prog_count += 1
         scrape_c.error_urls_d[scrap.workingurl].append(['jj_final_error'])
-        await homepage_fallback(scrap)
+        homepage_fallback(scrap)
     except Exception:
         logger.exception(f'final_e __error: {scrap.workingurl} {sys.exc_info()[2].tb_lineno}')
 
 
 
+async def create_req_sessions():
+    pw_req.session = await async_playwright().start()
+    pw_req.brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
+    
+    timeout = aiohttp.ClientTimeout(total=8)
+    static_req.session = await aiohttp.ClientSession(timeout=timeout)
 
 
 # Check internet connectivity
@@ -803,17 +795,18 @@ async def save_progress():
     logger.debug(f'begin prog save')
     try:
         # Pickle queue of scraps
-        async with scrape_c.q_lock:  ## unn?
-            with open(const.QUEUE_PATH, "wb") as f:
-                pickle.dump(scrape_c.all_urls_q, f)
+        with open(const.QUEUE_PATH, "wb") as f:
+            pickle.dump(scrape_c.all_urls_q, f)
 
         # CML, errorlog, and multiorg
         for each_path, each_dict in (const.CHECKED_PATH, scrape_c.checked_urls_d), (const.ERROR_PATH, scrape_c.error_urls_d), (const.MULTI_ORG_D_PATH, scrape_c.multi_org_d):
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
+                
+        logger.debug(f'prog save success')
+        
     except Exception:
         logger.exception(f'\n prog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
-    logger.debug(f'prog save success')
 
 
 async def check_mem():
@@ -843,7 +836,7 @@ async def run_scraper():
 async def maintenance():
     try:
         for intermittent_f in save_progress, ping_test, check_mem:
-            await intermittent_f()
+            await intermittent_f()  # save_progress and check_mem need to be async because ping_test is
             display_prog()
             await asyncio.sleep(8)
 
@@ -855,7 +848,7 @@ async def maintenance():
 # Main event loop
 async def main():
     logger.info(f'\n Program Start')
-
+    await create_req_sessions()
     await run_scraper()
 
     # Wait for scraping to finish
@@ -892,7 +885,6 @@ class bot_excluder:
     @timeout_decorator.timeout(8)
     def __init__(self, url, url_dup, dup_domain):
         logger.info(f'new domain: {dup_domain}')
-        self.lock = asyncio.Lock()
         self.rp = robotparser.RobotFileParser()
         self.last_req_ts = 0.0
         self.domain_count = 0
@@ -917,11 +909,10 @@ class bot_excluder:
 
     # After req
     def update(self):
-        #logger.debug(f"update start")
-        with self.lock:
-            self.last_req_ts = datetime.now().timestamp()
-            self.domain_count += 1
-        #logger.debug(f"update complete")
+        #logger.debug(f"rp update start")
+        self.last_req_ts = datetime.now().timestamp()
+        self.domain_count += 1
+        #logger.debug(f"rp update complete")
 
 
     def can_req(self, url):
