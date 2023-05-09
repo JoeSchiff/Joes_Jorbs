@@ -1,9 +1,9 @@
 
 errors:
-progress higher than total + homepage fallback
 progress lower than total at end
-
-remove "Cant append error to errorlog"?
+many urls missing
+no errors on website + all urls had -1 ccl
+blank kw field error +
 
 
 Todo:
@@ -19,7 +19,7 @@ use pw req obj for ping +
 
 refactor
     pw and aio sessions in their req class +
-    rename working_o to scrap? pre_req and post?
+    rename working_o to scrap +
     curernt:
         add_to_queue, fallback_success, check_red, count_jbws, write_results
     funcs can be methods:
@@ -29,6 +29,8 @@ refactor
 
 
 results.py to do:
+    exclude results and checked pages by get_zip_dict() +
+    sort results by jbw_conf or percent simularity?
     test {e<=0} +
     remove from import
     dict or class for res_list

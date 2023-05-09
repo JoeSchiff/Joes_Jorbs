@@ -42,14 +42,14 @@ class scrape_c:
     prog_count = 0
     total_count = 0
 
-    def __init__(self, org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup, req_attempt_num):
+    def __init__(self, org_name, workingurl, current_crawl_level, parent_url, jbw_type, workingurl_dup):
         self.org_name = org_name
         self.workingurl = workingurl
         self.current_crawl_level = current_crawl_level
         self.parent_url = parent_url
         self.jbw_type = jbw_type
         self.workingurl_dup = workingurl_dup
-        self.req_attempt_num = req_attempt_num
+        self.req_attempt_num = 0
         self.domain = '://'.join(parse.urlparse(workingurl)[:2])  # Includes scheme and www. Used for building abspaths from rel links
         self.dup_domain = workingurl_dup.split('/')[0]  # Used for domain limiter
 
@@ -72,26 +72,15 @@ class scrape_c:
 
 
     # Add new working list to the queue
-    def add_to_queue(self,
-        workingurl = self.workingurl,
-        current_crawl_level = self.current_crawl_level,
-        parent_url = self.parent_url,
-        workingurl_dup = self.workingurl_dup,
-        req_attempt_num = 0):
+    def add_to_queue(scrap):
+        logger.debug(f'Putting url into queue: {scrap.workingurl}. \nFrom: {scrap.parent_url}')
+        checked_urls_d_entry(scrap.workingurl_dup, None)  # Add new entry to CML
 
-        checked_urls_d_entry(self.workingurl_dup, None)  # Add new entry to CML
-
-        # Create new working list: [org name, URL, crawl level, parent URL, jbw type, url_dup, req attempt]
-        new_scrap = scrape_c(self.org_name, workingurl, current_crawl_level, parent_url, self.jbw_type, workingurl_dup, req_attempt_num)
-        logger.debug(f'Putting list into queue: {new_scrap}')
-        logger.debug(f'From: {self.parent_url}')
-
-        # Put new working list in queue
         try:
-            scrape_c.all_urls_q.put_nowait(new_scrap)
+            scrape_c.all_urls_q.put_nowait(scrap)
             scrape_c.total_count += 1
         except Exception:
-            logger.exception(f'__Error trying to put into all_urls_q: {new_scrap}')
+            logger.exception(f'__Error trying to put into all_urls_q: {scrap}')
 
 
     # Get working list from queue
@@ -170,11 +159,16 @@ class scrape_c:
         if self.current_crawl_level != 0:
             return
 
-        logger.info(f'Using URL fallback: {self.parent_url}')
-
         if proceed(self.parent_url):
+            logger.info(f'Using URL fallback: {self.parent_url}')
             scrape_c.prog_count -= 1  ## undo progress count from final error
-            self.add_to_queue(workingurl=self.parent_url, current_crawl_level=-1, parent_url=self.workingurl, workingurl_dup=dup_checker(self.parent_url))
+            new_scrap = scrape_c(org_name = self.org_name,
+                workingurl = self.parent_url,
+                current_crawl_level = -1,
+                parent_url = self.workingurl,
+                jbw_type = self.jbw_type,
+                workingurl_dup = dup_checker(self.parent_url))
+            scrape_c.add_to_queue(new_scrap)
 
 
 
@@ -190,7 +184,13 @@ class scrape_c:
                     abspath = parse.urljoin(self.domain, anchor_tag.get('href'))
                     if proceed(abspath):
                         logger.info(f'Adding pagination url: {abspath} {self.workingurl}')
-                        self.add_to_queue(workingurl=abspath, parent_url=self.workingurl, workingurl_dup=dup_checker(abspath))
+                        new_scrap = scrape_c(org_name = self.org_name,
+                            workingurl = abspath,
+                            current_crawl_level = self.current_crawl_level,  ##
+                            parent_url = self.workingurl,
+                            jbw_type = self.jbw_type,
+                            workingurl_dup = dup_checker(abspath))
+                        scrape_c.add_to_queue(new_scrap)
 
                 # look for next page button represented by angle bracket
                 elif '>' in anchor_tag.text:
@@ -219,7 +219,7 @@ class scrape_c:
 
             # Skip if no jobwords in content
             ## use this for only high conf jbws
-            tag_content = str(tag.text).lower()
+            tag_content = str(tag.text).lower().strip()
             if not any(jbw in tag_content for jbw in self.jbws_high_conf):
                 #logger.debug(f'No jobwords detected: {workingurl} {tag_content[:99]}')
                 continue
@@ -236,7 +236,7 @@ class scrape_c:
 
             bs_url = anchor_tag.get('href')
             abspath = parse.urljoin(self.domain, bs_url).strip()  # Convert relative paths to absolute and strip whitespace
-            logger.debug(f'abspath: {abspath} {tag_content}')
+            logger.debug(f'tag_content: {abspath} {tag_content}')
             # Remove non printed characters
             #abspath = abspath.encode('ascii', 'ignore').decode()
             #abspath = parse.quote(abspath)
@@ -251,7 +251,7 @@ class scrape_c:
     def crawler(self):
         try:
             # Search for pagination links before checking crawl level
-            get_pagination(self)
+            self.get_pagination()
 
             # Limit crawl level
             if self.current_crawl_level > const.MAX_CRAWL_DEPTH:
@@ -261,9 +261,15 @@ class scrape_c:
             self.current_crawl_level += 1
 
             # Check new URLs and append to queue
-            for abspath in get_links(self):
+            for abspath in self.get_links():
                 if proceed(abspath):
-                    self.add_to_queue(workingurl=abspath, workingurl_dup=dup_checker(abspath), parent_url=self.workingurl)
+                    new_scrap = scrape_c(org_name = self.org_name,
+                        workingurl = abspath,
+                        current_crawl_level = self.current_crawl_level,
+                        parent_url = self.workingurl,
+                        jbw_type = self.jbw_type,
+                        workingurl_dup = dup_checker(abspath))
+                    scrape_c.add_to_queue(new_scrap)
 
         except Exception as errex:
             logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {str(traceback.format_exc())} {self}')
@@ -273,8 +279,6 @@ class scrape_c:
 
     # Determine confidence that a page has job postings
     def count_jbws(self):
-
-        # Count jobwords on the page
         jbw_count = 0
         for i in self.jbws_low_conf:
             if i in self.vis_text: jbw_count += 1
@@ -301,7 +305,7 @@ class scrape_c:
         html_path = os.path.join(org_path, url_path)[:254]  # max length is 255 chars
 
         # Make file content. Separate with ascii delim char
-        file_contents_s = f'{self.jbw_count} ▼ {self.browser} ▼ {self.vis_text}'
+        file_contents_s = f'{self.jbw_count} \x1f {self.browser} \x1f {self.vis_text}'
 
         # Write text to file
         with open(html_path, "w", encoding='ascii', errors='ignore') as write_html:
@@ -466,7 +470,7 @@ class pw_req(requester_base):
 
 class pw_ping(pw_req):
     def __init__(self):
-        scrap = scrape_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com', 0)
+        scrap = scrape_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com')
         super().__init__(scrap)
 
 
@@ -559,12 +563,11 @@ def proceed(url) -> bool:
         logger.debug(f'Skipping: {url_dup}')
         return False
 
-
     # Check robots.txt
     domain_o = get_robots_txt(url, url_dup)
     if not domain_o.can_req(url):
+        logger.debug(f'fetch disallowed: {url_dup}')
         return False
-
 
     # Exclude if the new_url is on the blacklist
     if url_dup in blacklist.combined_l:
@@ -593,7 +596,7 @@ async def req_looper():
         await check_internet_connection()
 
         # Get url from queue
-        scrap = await get_scrap(task_id)
+        scrap = await scrape_c.get_scrap(task_id)
         if not scrap: continue
 
         requester = scrap.choose_requester(task_id)
@@ -612,7 +615,7 @@ async def req_looper():
                 requester.resp_err_handler(scrap)
 
         except asyncio.TimeoutError as errex:  ## not possible without wait for?
-            logger.warning(f'looper timeout __error: {errex} {self.workingurl}')
+            logger.warning(f'looper timeout __error: {errex} {scrap.workingurl}')
             add_errorurls(self, 'jj_error 8', 'looper timeout', True)
 
         except Exception as errex:
@@ -685,7 +688,7 @@ def final_error(scrap):
     try:
         scrape_c.prog_count += 1
         scrape_c.error_urls_d[scrap.workingurl].append(['jj_final_error'])
-        homepage_fallback(scrap)
+        scrap.homepage_fallback()
     except Exception:
         logger.exception(f'final_e __error: {scrap.workingurl} {sys.exc_info()[2].tb_lineno}')
 
@@ -696,7 +699,7 @@ async def create_req_sessions():
     pw_req.brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
     
     timeout = aiohttp.ClientTimeout(total=8)
-    static_req.session = await aiohttp.ClientSession(timeout=timeout)
+    static_req.session = aiohttp.ClientSession(timeout=timeout)
 
 
 # Check internet connectivity
@@ -803,7 +806,7 @@ async def save_progress():
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
                 
-        logger.debug(f'prog save success')
+        logger.info(f'progress save success')
         
     except Exception:
         logger.exception(f'\n prog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
@@ -819,9 +822,11 @@ async def check_mem():
 # Display progress
 def display_prog():
     logger.info(f'\nProgress: {scrape_c.prog_count} of {scrape_c.total_count}')
+    #logger.info(f'Browser{pw_req.brow._impl_obj._browser_type.name}')
     for context in pw_req.brow.contexts:
-        logger.info(f'{pw_req.brow._impl_obj._browser_type.name} open pages: {len(context.pages)} {context.pages}')
+        logger.info(f'Open pages: {len(context.pages)} {context.pages}')
     logger.info(f'running tasks: {len(asyncio.all_tasks())}')
+    logger.info(f'{const.SEMAPHORE=}')
     #prant('running tasks:', asyncio.all_tasks())
 
 
@@ -837,12 +842,13 @@ async def maintenance():
     try:
         for intermittent_f in save_progress, ping_test, check_mem:
             await intermittent_f()  # save_progress and check_mem need to be async because ping_test is
+            await asyncio.sleep(8)
             display_prog()
             await asyncio.sleep(8)
 
     except Exception:
         logger.exception(f'\nmaintenance __ERROR: {sys.exc_info()[2].tb_lineno}')
-        await asyncio.sleep(2)
+        await asyncio.sleep(8)
 
 
 # Main event loop
@@ -1112,7 +1118,7 @@ def init_queue(db, db_label):
             scrape_c.multi_org_d[db_label][url_dup] = [org_name]  # First org using this URL
 
             # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
-            scrap = scrape_c(org_name, em_url, 0, homepage, db_label, url_dup, 0)
+            scrap = scrape_c(org_name, em_url, 0, homepage, db_label, url_dup)
             proceed(em_url)  # respect robots.txt
             scrape_c.all_urls_q.put_nowait(scrap)
 
