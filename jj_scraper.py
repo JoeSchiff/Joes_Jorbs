@@ -7,7 +7,7 @@
 
 import aiohttp
 import asyncio
-import glob
+from glob import glob
 import json
 import logging
 import os
@@ -18,7 +18,6 @@ import shutil
 import sys
 import subprocess
 import timeout_decorator
-import traceback
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, date
 from playwright.async_api import async_playwright, TimeoutError
@@ -63,7 +62,15 @@ class scrape_c:
 
 
     def __str__(self):
-        return f'{self.org_name} {self.workingurl} {self.current_crawl_level} {self.parent_url} {self.jbw_type} {self.workingurl_dup} {self.req_attempt_num} {self.domain} {self.dup_domain}'
+        return f'''{self.org_name}
+            {self.workingurl}
+            {self.current_crawl_level}
+            {self.parent_url}
+            {self.jbw_type}
+            {self.workingurl_dup}
+            {self.req_attempt_num}
+            {self.domain}
+            {self.dup_domain}'''
 
 
     # Get important attributes. useful for adding new workingo to queue
@@ -94,6 +101,7 @@ class scrape_c:
         except asyncio.QueueEmpty:
             logger.info(f'queue empty')
             scrape_c.all_done_d[task_id] = True
+            print(scrape_c.all_done_d)
             await asyncio.sleep(8)
 
         except Exception:
@@ -250,8 +258,7 @@ class scrape_c:
     # Explore html to find more links and weigh confidence
     def crawler(self):
         try:
-            # Search for pagination links before checking crawl level
-            self.get_pagination()
+            self.get_pagination()  # Search for pagination links before checking crawl level
 
             # Limit crawl level
             if self.current_crawl_level > const.MAX_CRAWL_DEPTH:
@@ -272,9 +279,8 @@ class scrape_c:
                     scrape_c.add_to_queue(new_scrap)
 
         except Exception as errex:
-            logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {str(traceback.format_exc())} {self}')
+            logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {self}')
             add_errorurls(self, 'jj_error 1', str(errex), True)
-            return
 
 
     # Determine confidence that a page has job postings
@@ -564,9 +570,9 @@ def proceed(url) -> bool:
         return False
 
     # Check robots.txt
-    domain_o = get_robots_txt(url, url_dup)
-    if not domain_o.can_req(url):
-        logger.debug(f'fetch disallowed: {url_dup}')
+    domain_tracker = get_robots_txt(url, url_dup)
+    if not domain_tracker.can_request(url):
+        logger.debug(f'request disallowed: {url_dup}')
         return False
 
     # Exclude if the new_url is on the blacklist
@@ -616,7 +622,7 @@ async def req_looper():
 
         except asyncio.TimeoutError as errex:  ## not possible without wait for?
             logger.warning(f'looper timeout __error: {errex} {scrap.workingurl}')
-            add_errorurls(self, 'jj_error 8', 'looper timeout', True)
+            add_errorurls(scrap, 'jj_error 8', 'looper timeout', True)
 
         except Exception as errex:
             requester.failed_req_handler(scrap, errex)
@@ -840,10 +846,10 @@ async def run_scraper():
 # Run housekeeping funcs and display progress
 async def maintenance():
     try:
-        for intermittent_f in save_progress, ping_test, check_mem:
-            await intermittent_f()  # save_progress and check_mem need to be async because ping_test is
-            await asyncio.sleep(8)
+        for intermittent_f in ping_test, check_mem, save_progress:
             display_prog()
+            await asyncio.sleep(8)
+            await intermittent_f()  # save_progress and check_mem need to be async because ping_test is
             await asyncio.sleep(8)
 
     except Exception:
@@ -921,27 +927,37 @@ class bot_excluder:
         #logger.debug(f"rp update complete")
 
 
-    def can_req(self, url):
+    def can_request(self, url):
+        if all((ask_robots_txt(), check_domain_rate_limiter(), check_domain_occurrence_limiter())):
+            return True
+
+
+    def ask_robots_txt(self):
         if self.rp and len(self.rp.__str__()) > 1:
             if not self.rp.can_fetch('*', url):
                 logger.info(f'rp can not fetch: {url}')
                 return False
+        return True
 
-            # Domain rate limiter
-            crawl_delay = self.rp.crawl_delay('*')
-            if crawl_delay:
-                time_elapsed = datetime.now().timestamp() - self.last_req_ts
-                if time_elapsed < crawl_delay:
-                    logger.info(f'rp crawl delay wait: {url} {crawl_delay} {time_elapsed}')
-                    # put back in queue or wait
-                    import time
-                    #time.sleep(crawl_delay - time_elapsed)
 
-        # Exclude if domain occurrence limit is exceeded
+    def check_domain_rate_limiter(self):
+        crawl_delay = self.rp.crawl_delay('*')
+        if crawl_delay:
+            time_elapsed = datetime.now().timestamp() - self.last_req_ts
+            if time_elapsed < crawl_delay:
+                logger.info(f'rp crawl delay wait: {crawl_delay} {time_elapsed} {url}')
+                # put back in queue or wait
+                import time
+                time.sleep(crawl_delay - time_elapsed)
+        return True
+
+
+    def check_domain_occurrence_limiter(self):
         if self.domain_count > const.DOMAIN_LIMIT:
             logger.info(f'Domain limit exceeded: {url} {self.domain_count}')
             checked_urls_d_entry(url_dup, 'Domain limit exceeded')
             return False
+        return True
 
 
     # Reuse old robots.txts to populate bot_excluder.domain_d
@@ -999,7 +1015,7 @@ class blacklist_c:
         rem_l = []
         for url, bl_date_s in self.auto_blacklist_d.items():
             bl_date_dt = date.fromisoformat(bl_date_s)
-            if bl_date_dt + timedelta(days=const.BLACKLIST_EXPIRATION_DAYS) > date.today():
+            if bl_date_dt + timedelta(days=const.BLACKLIST_EXPIRATION_DAYS) < date.today():
                 rem_l.append(url)
 
         # Remove after iteration
@@ -1174,58 +1190,49 @@ def multi_org_copy():
     logger.info(f'Multi org files: {file_count}')
 
 
-# Fallback to older results if newer results are missing
-def fallback_old_copy():
-    dater_d = glob.glob(const.JORB_HOME_PATH + "/*")  # List all date dirs
+# Reuse older results for any webpage that couldn't be retrieved
+def fallback_to_old_results():
+    dater_d = glob(const.JORB_HOME_PATH + "/*")  # List all date dirs
+    if len(dater_d) < 2: return
+
     dater_d.sort(reverse=True)
-    if len(dater_d) > 1:  # Skip if there are no old results
-        logger.info(f'\nFalling back to old results: {dater_d[1]}')
-        old_dater_results_dir = os.path.join(dater_d[1], 'results')
-        count = 0
+    logger.info(f'\nFalling back to old results: {dater_d[1]}')
+    old_dater_results_dir = os.path.join(dater_d[1], 'results')
 
-        # Loop through each results dir
-        for each_db in const.DB_TYPES:
+    for db_name in const.DB_TYPES:
+        cur_db_dir = os.path.join(const.RESULTS_PATH, db_name)
+        old_db_dir = os.path.join(old_dater_results_dir, db_name)
 
-            # Select old and current db dirs
-            cur_db_dir = os.path.join(const.RESULTS_PATH, each_db)
-            old_db_dir = os.path.join(old_dater_results_dir, each_db)
-            inc_old_dir = os.path.join(const.RESULTS_PATH, 'include_old', each_db)
+        cur_org_names_l = [os.path.basename(path) for path in glob(cur_db_dir + '/*')]
+        old_org_names_l = [os.path.basename(path) for path in glob(old_db_dir + '/*')]
 
-            # Loop through each org name dir in the old db type dir
-            for old_org_name_path in glob.glob(old_db_dir + '/*'):
-                old_org_name = old_org_name_path.split('/')[-1]  # Remove path from org name
+        missing_orgs_l = set(old_org_names_l) - set(cur_org_names_l)
+        copy_old_results(db_name, missing_orgs_l)
 
-                # Check current db dir
-                for cur_org_name_path in glob.glob(cur_db_dir + '/*'):
+    logger.info(f'Files in /include_old: {len(glob(inc_old_dir))}')
 
-                    # Skip if the new dir has the result
-                    cur_org_name = cur_org_name_path.split('/')[-1]
-                    if old_org_name == cur_org_name:
-                        break
 
-                # If new org name dir is missing
-                else:
-                    inc_org_name_path = inc_old_dir + '/' + old_org_name  # Make old_include/old_org_name dir
+# Copy old org name dir to new include_old dir
+def copy_old_results(db_name, missing_orgs_l):
+    inc_old_dir = os.path.join(const.RESULTS_PATH, 'include_old', db_name)
+    for org_name in missing_orgs_l:
+        inc_org_name_path = os.path.join(inc_old_dir, org_name)
 
-                    # Copy old org name dir to db type include_dir
-                    if not os.path.exists(inc_org_name_path):
-                        shutil.copytree(old_org_name_path, inc_org_name_path)
-                        count += 1
-                        logger.debug(f'Copied fallback result: {old_org_name}')
+        if not os.path.exists(inc_org_name_path):  # copy will create dir
+            old_org_name_path = os.path.join(old_db_dir, org_name)
+            shutil.copytree(old_org_name_path, inc_org_name_path)
+            logger.debug(f'Copied fallback result: {org_name}')
 
-                    # Catch errors
-                    else:
-                        logger.info(f'Already exists: {inc_org_name_path}')
-
-    logger.info(f'Files in /include_old: {count}')
-
+        # Catch errors
+        else:
+            logger.warning(f'Already exists: {inc_org_name_path}')
 
 
 # Copy results to remote server using bash
 def send_to_server():
-    cmd_proc = subprocess.run(const.PUSH_RESULTS_PATH, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    logging.info(cmd_proc.stdout)
-
+    #cmd_proc = subprocess.run(const.PUSH_RESULTS_PATH, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    #logging.info(cmd_proc.stdout.decode("utf-8"))  # decode bytes to str
+    logging.info(subprocess.getoutput(const.PUSH_RESULTS_PATH))
 
 
 
@@ -1262,7 +1269,7 @@ def config_logger():
 # Handle uncaught exceptions
 def uncaught_handler(exctype, value, tb):
     logger.critical(f'------- UNCAUGHT {exctype}, {value}, {tb.tb_lineno}')
-#sys.excepthook = uncaught_handler
+sys.excepthook = uncaught_handler
 
 
 
@@ -1288,7 +1295,7 @@ if __name__ == '__main__':
 
     display_stats()
     multi_org_copy()
-    fallback_old_copy()
+    fallback_to_old_results()
 
     send_to_server()
 

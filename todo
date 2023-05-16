@@ -1,13 +1,15 @@
 
 errors:
-progress lower than total at end
-many urls missing
+progress lower than total at end + 
+many urls missing + can fetch always returned false
 no errors on website + all urls had -1 ccl
 blank kw field error +
+scraper never completes + uncaught exception
 
 
 Todo:
 recover q loses all working urls. keep track of current urls being requested and combine with q prior to writing to file?
+error parse tally number of logger.warn, err, and exc
 rewrite errorlog. with logging?
     class inst to be more descriptive?
     init with empty lists?
@@ -18,14 +20,15 @@ use pw req obj for ping +
     ping as child class of pw +
 
 refactor
+    err parser
+    index
+    error funcs
+        can be in scrap or own class. child class?
+    back_in_q_b as sep func?
     pw and aio sessions in their req class +
     rename working_o to scrap +
-    curernt:
-        add_to_queue, fallback_success, check_red, count_jbws, write_results
-    funcs can be methods:
-        choose_requester+, req_success, add_errorurls, final_error, homepage_fallback+, get_pagination+, get_links+, crawler+
-    back_in_q_b as sep func?
-    results.py and index
+    results.py +
+
 
 
 results.py to do:
@@ -81,8 +84,7 @@ respect robots.txt
         dict of domains: obj as value? +
         save and recover +
         global default rate limiter also
-    why class? use attributes not dict +
-    use self in methods +
+
 
 auto blacklist
     static bl is unn

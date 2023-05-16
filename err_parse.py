@@ -12,13 +12,16 @@
 # distinguish jj_error a and b for: 2-7
 # merge with auto blacklist +
 # switch to logging +
+#   output kinda sloppy
+# tally number of logger.warn, err, and exc 
+# functions
 
 
 
-
-
-
-import glob, json, sys, logging
+from glob import glob
+import json
+import sys
+import logging
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -29,6 +32,7 @@ logger = logging.getLogger(__name__)
 all_d = {}  # Dict for holding all errorlogs
 using_l = []  # Only for convience
 
+logger.info(f'\n Begin error parser')
 logger.info(f'{sys.argv}')
 
 # No args. Use 3 most recent
@@ -228,16 +232,16 @@ for i in rec_errs_l:
 
 
 
+with open(dater[0] + '/log_file', 'r') as f:
+    log_file = f.read()
 
+warning_count = log_file.count(' - WARNING - ')
+error_count = log_file.count(' - ERROR - ')
+critical_count = log_file.count(' - CRITICAL - ')
 
-
-
-
-
-
-
-
-
+logger.info(f'\nWarning count: {warning_count}')
+logger.info(f'Error count: {error_count}')
+logger.info(f'Critical count: {critical_count}')
 
 
 
