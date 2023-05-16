@@ -13,7 +13,7 @@
 # merge with auto blacklist +
 # switch to logging +
 #   output kinda sloppy
-# tally number of logger.warn, err, and exc 
+# tally number of logger.warn, err, and exc +
 # functions
 
 
@@ -35,59 +35,59 @@ using_l = []  # Only for convience
 logger.info(f'\n Begin error parser')
 logger.info(f'{sys.argv}')
 
-# No args. Use 3 most recent
-num_files = 2
-dater = glob.glob("/home/joepers/joes_jorbs/*")  # where to find errorlogs
-dater.sort(reverse=True)
-dater_dir_pos = 0  # which errorlog to try to read
 
 
-# Args exist, overwrite defaults
-if len(sys.argv) > 1:
-
-    # Use user-supplied number of files
-    if sys.argv[1].isnumeric():
-        num_files = int(sys.argv[1])
-
-        logger.info(f'Using number of files: {num_files}')
-
-    # Use user-supplied specific files
-    else:
-        num_files = len(sys.argv) - 1
-        dater = sys.argv[1:]  # find errorlogs in args
+def get_errorlogs():
+    # No args. Use n most recent
+    if len(sys.argv) == 1:
+        num_files = 2
+        dater = glob.glob("/home/joepers/joes_jorbs/*")  # where to find errorlogs
         dater.sort(reverse=True)
-        dater_dir_pos = 0  # start at pos 1
-        #logger.info(f'Using files:', dater)
-    
+
+    else:
+        # Use user-supplied number of files
+        if sys.argv[1].isnumeric():
+            logger.info(f'Using number of files: {num_files}')
+            num_files = int(sys.argv[1])
+
+        # Use user-supplied specific files
+        else:
+            num_files = len(sys.argv) - 1
+            dater = sys.argv[1:]  # find errorlogs in args
+            dater.sort(reverse=True)
+            #logger.info(f'Using files:', dater)
+get_errorlogs(num_files)
 
 
-# Loop through errorlogs up to specified amount
-for err_log_num in range(1, (num_files + 1)):
+def read_errorlogs(num_files):
+    dater_dir_pos = 0  ## combine with err_log_num
+    # Loop through errorlogs up to specified amount
+    for err_log_num in range(1, (num_files + 1)):
 
-    # Try next errorlog on error
-    while dater_dir_pos < num_files:
+        # Try next errorlog on error
+        while dater_dir_pos < num_files:
 
-        # Read errorlog, save contents to all_d
-        try:
-            date_s = dater[dater_dir_pos].split('/')[4]
-            with open(dater[dater_dir_pos] + '/errorlog', 'r') as f:
-                all_d[date_s] = json.loads(f.read())
-                logger.info(f'Using: {date_s}')
-                using_l.append(date_s)
+            # Read errorlog, save contents to all_d
+            try:
+                date_s = dater[dater_dir_pos].split('/')[4]
+                with open(dater[dater_dir_pos] + '/errorlog', 'r') as f:
+                    all_d[date_s] = json.loads(f.read())
+                    logger.info(f'Using: {date_s}')
+                    using_l.append(date_s)
+                    dater_dir_pos += 1  # inc to next errorlog on pass or fail
+                    break
+            
+            ## if any user speced files fails, it will be fatal error
+            except Exception as errex:
+                logger.info(f'some error: {errex} {sys.exc_info()[2].tb_lineno}')
+                '''
+                if 'Expecting property name enclosed in double quotes' in str(errex):
+                    logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], 'prob due to partial scrape')
+                else:
+                    logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], errex)
+                '''
                 dater_dir_pos += 1  # inc to next errorlog on pass or fail
-                break
-        
-        ## if any user speced files fails, it will be fatal error
-        except Exception as errex:
-            logger.info(f'some error: {errex} {sys.exc_info()[2].tb_lineno}')
-            '''
-            if 'Expecting property name enclosed in double quotes' in str(errex):
-                logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], 'prob due to partial scrape')
-            else:
-                logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], errex)
-            '''
-            dater_dir_pos += 1  # inc to next errorlog on pass or fail
-
+read_errorlogs(num_files)
 
 
 
