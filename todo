@@ -1,27 +1,37 @@
 
 errors:
-progress lower than total at end + 
-many urls missing + can fetch always returned false
-no errors on website + all urls had -1 ccl
-blank kw field error +
-scraper never completes + uncaught exception
+progress lower than total at end
+rp not found: https://www.madisoncounty.ny.gov/robots.txt
+autobl always uses todays date. recurring final errors are not being skipped?  + proceed() was not being respected in init_queue()
+call bot_excluder.write_file after scraper or immediatly after rp gets updated?
 
 
-Todo:
+todo:
 recover q loses all working urls. keep track of current urls being requested and combine with q prior to writing to file?
-error parse tally number of logger.warn, err, and exc
-rewrite errorlog. with logging?
+rewrite errorlog
     class inst to be more descriptive?
     init with empty lists?
     put all minor errors into new jj error
-    cml_text = '{\n'
+    cml_text = '{\n'   - what?
 
-use pw req obj for ping +
-    ping as child class of pw +
+
+
+index +
+  globals -
+    keyword_arr
+    currentTab
+  html validator: https://beautifytools.com/javascript-validator.php +
+  js camelcase naming convention
+  1. Always declare variables
+  2. Always use const if the value should not be changed
+  3. Always use const if the type should not be changed (Arrays and Objects)
+  4. Only use let if you can't use const
+  5. Only use var if you MUST support old browsers. var has function scope. let is block scope
+
 
 refactor
-    err parser
-    index
+    err parser +
+    index +
     error funcs
         can be in scrap or own class. child class?
     back_in_q_b as sep func?
@@ -30,27 +40,20 @@ refactor
     results.py +
 
 
-
 results.py to do:
-    exclude results and checked pages by get_zip_dict() +
-    sort results by jbw_conf or percent simularity?
-    test {e<=0} +
-    remove from import
-    dict or class for res_list
-    why browser in each results file?
-    move zips out of file +
+    sort results by jbw_conf or percent simularity? can remove jbw conf from result files
+    dict or class instead of nested res_list
+    remove browser in each results file
     reconsider skipping geodesic with high max_dist
+    optimise: two separate sections. one with geolimter function
     remove zip_form? display purposes only. keep
         why send coords from form? prevents double lookup
     show jj_error num in tooltip on error tabs?
-    improve code comments
-    optimise: two separate sections. one with geolimter function
     reword error pages to discourage refreshing?
     sort errors by alpha?
-    sort results by jbw conf or fuzzy match percent? user specified -
-    percent decode urls
+    percent decode urls?
     wraparound text for mobile?
-    no error will be displayed if failed to read vis text file
+
 
 remove
     remove locks + operations are atomic, race condition not possible
@@ -154,7 +157,7 @@ improve code comments
 zip_dict one entry per line?
 hide modal after back button without refresh - difficult
 show progress on modal - difficult
-new modal over old for progress?
+  new modal over old for progress?
 create favicon
 
 

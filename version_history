@@ -83,7 +83,7 @@ respect robots
 3.2 - ?
 replace prant with logging module
 major refactor
-polymorphic requester classes. requests and error handling
+polymorphic requester classes. requests, error handling, ping
 one pw browser. removed unnecessary brow restart behavior
 
 

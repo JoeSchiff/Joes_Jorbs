@@ -1,20 +1,20 @@
 
-# Desc: Parse JJ errorlog
+# Desc: Parse JJ errorlogs. Deeper analyses performed on most recent (primary) errorlog
+
+# Args: Supply integer to consider N most recent errorlogs. Or supply paths to files.
 
 
-# if hangs when supplying files, prob error with that file
 
 
 # To do:
-# switch to delim char. - where?
-# count how many recoveries from each error
-# always include a and b ? or just b?
-# distinguish jj_error a and b for: 2-7
-# merge with auto blacklist +
+# distinguish jj_error a and b for errs 2-7
+#   how display?
 # switch to logging +
-#   output kinda sloppy
-# tally number of logger.warn, err, and exc +
-# functions
+#   set levels
+#   remove name from output +
+#   remove level from output when imported. - prob inherits log level of scraper
+# errorlog suffers from poor structure. switch to named attrs not nested lists
+
 
 
 
@@ -24,227 +24,232 @@ import sys
 import logging
 
 
-logging.basicConfig(level=logging.DEBUG)
+
+
+logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 logger = logging.getLogger(__name__)
-#logger.setLevel(logging.DEBUG)
-
-
-all_d = {}  # Dict for holding all errorlogs
-using_l = []  # Only for convience
 
 logger.info(f'\n Begin error parser')
-logger.info(f'{sys.argv}')
 
 
 
-def get_errorlogs():
-    # No args. Use n most recent
+def display_err_descriptions():
+    logger.info(f'\njj_error 1: Crawler')
+    logger.info(f'jj_error 2: Non-HTML')
+    logger.info(f'jj_error 3: Request timeout')
+    logger.info(f'jj_error 4: HTTP 404 / 403')
+    logger.info(f'jj_error 5: Other HTTP')
+    logger.info(f'jj_error 6: Other request')
+    logger.info(f'jj_error 7: Empty vis text')
+    logger.info(f'jj_error 8: Looper timeout')
+    #logger.info(f'jj_error 9: (reserved)')
+
+
+def get_options():
+    logger.info(f'Args: {sys.argv[1:]}')
     if len(sys.argv) == 1:
+        logger.info(f'Using default options')
         num_files = 2
-        dater = glob.glob("/home/joepers/joes_jorbs/*")  # where to find errorlogs
-        dater.sort(reverse=True)
-
+        date_dir = glob("/home/joepers/joes_jorbs/*")
     else:
-        # Use user-supplied number of files
-        if sys.argv[1].isnumeric():
-            logger.info(f'Using number of files: {num_files}')
+
+        if len(sys.argv) == 2 and sys.argv[1].isnumeric():
+            logger.info(f'Using number of files')
             num_files = int(sys.argv[1])
+            date_dir = glob("/home/joepers/joes_jorbs/*")
 
-        # Use user-supplied specific files
         else:
+            logger.info(f'Using specific files')
             num_files = len(sys.argv) - 1
-            dater = sys.argv[1:]  # find errorlogs in args
-            dater.sort(reverse=True)
-            #logger.info(f'Using files:', dater)
-get_errorlogs(num_files)
+            date_dir = sys.argv[1:]
+
+    return num_files, sorted(date_dir, reverse=True)
 
 
-def read_errorlogs(num_files):
-    dater_dir_pos = 0  ## combine with err_log_num
-    # Loop through errorlogs up to specified amount
-    for err_log_num in range(1, (num_files + 1)):
+def read_errorlogs(num_files, date_dir):
+    all_errorlog_d = {}
+    for err_log_num in range(num_files):
+        try:
+            date_s = date_dir[err_log_num].split('/')[4]
+            with open(date_dir[err_log_num] + '/errorlog', 'r') as f:
+                all_errorlog_d[date_s] = json.loads(f.read())
+                logger.info(f'Using: {date_s}')
 
-        # Try next errorlog on error
-        while dater_dir_pos < num_files:
-
-            # Read errorlog, save contents to all_d
-            try:
-                date_s = dater[dater_dir_pos].split('/')[4]
-                with open(dater[dater_dir_pos] + '/errorlog', 'r') as f:
-                    all_d[date_s] = json.loads(f.read())
-                    logger.info(f'Using: {date_s}')
-                    using_l.append(date_s)
-                    dater_dir_pos += 1  # inc to next errorlog on pass or fail
-                    break
-            
-            ## if any user speced files fails, it will be fatal error
-            except Exception as errex:
-                logger.info(f'some error: {errex} {sys.exc_info()[2].tb_lineno}')
-                '''
-                if 'Expecting property name enclosed in double quotes' in str(errex):
-                    logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], 'prob due to partial scrape')
-                else:
-                    logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], errex)
-                '''
-                dater_dir_pos += 1  # inc to next errorlog on pass or fail
-read_errorlogs(num_files)
+        except Exception as errex:
+            logger.info(f'error: {errex} {sys.exc_info()[2].tb_lineno}')
+            '''
+            if 'Expecting property name enclosed in double quotes' in str(errex):
+                logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], 'prob due to partial scrape')
+            else:
+                logger.info(f'Failed:', dater[dater_dir_pos].split('/')[4], errex)
+            '''
+    if len(all_errorlog_d) < 1:
+        logger.info(f'No errorlogs have been read. Exiting ...')
+        sys.exit()
+    return all_errorlog_d
 
 
+# Key numbers correspond to jj_error codes
+def init_tally_dicts():
+    total_err_d = {}
+    final_err_d = {}
+    for i in range(1,9):
+        total_err_d[str(i)] = []
+        final_err_d[str(i)] = []
+    return total_err_d, final_err_d
 
 
-fallback_l = []
-jj_7a_l = []
-jj_7b_l = []
-jj_7c_l = []
-
-# Init dicts with empty lists. Key names correspond to jj_error codes
-total_d = {}
-for i in range(1,10): total_d[str(i)] = []
-
-final_d = {}
-for i in range(1,10): final_d[str(i)] = []
+def get_most_recent_errorlog(all_errorlog_d):
+    errorlog_name = list(all_errorlog_d)[0]
+    logger.info(f'\n\n ------------ Most recent errorlog: {errorlog_name} ------------')
+    return all_errorlog_d[errorlog_name]
 
 
-# Tally all errors and final errors in first errorlog
-for url, value in all_d[list(all_d)[0]].items():
-
-    info_l = value[0]
-    org_name = value[0][0]
-    db_type = value[0][1]
-    crawl_level = value[0][2]
-
-    err_l = value[1]
-    final_l = value[-1]
+def get_err_num(each_err):
+    return each_err[1].split('jj_error ')[1][0]  # final index operator excludes letter from 7b etc
 
 
+def build_tally_lists(primary_errorlog):
+    total_err_d, final_err_d = init_tally_dicts()
+    fallback_l = []
+    jj_7a_l = []
+    jj_7b_l = []
+
+    for url, err_nested_l in primary_errorlog.items():
+        err_l = err_nested_l[1]
+        desc_l = err_nested_l[-1]
+
+        total_err_d = tally_total_errors(err_l, url, total_err_d)
+        last_err_num = get_err_num(err_l[-1])
+        final_err_d = tally_final_errors(desc_l, url, last_err_num, final_err_d)
+
+        fallback_l = tally_fallbacks(desc_l, url, fallback_l)
+        jj_7a_l, jj_7b_l = tally_error_7(err_l, jj_7a_l, jj_7b_l)
+
+    logger.info(f'\nFallback to homepage successes: {len(fallback_l)}')
+    count_error_7_recoveries(jj_7a_l, jj_7b_l)
+
+    return total_err_d, final_err_d
+
+
+def tally_total_errors(err_l, url, total_err_d):
     for each_err in err_l:
-        err_num = each_err[1].split('jj_error ')[1][0]  # Get error number from last error. exclude letter from 7b etc
-        total_d[err_num].append(url)  # Tally all errors
+        err_num = get_err_num(each_err)
+        total_err_d[err_num].append(url)
+    return total_err_d
 
 
-    ## use only last err num? record all err nums?
-    if 'jj_final_error' in final_l: final_d[err_num].append(url)  # Tally final errors
-
-    if 'fallback_success' in final_l: fallback_l.append(url)  # Tally fallback successes
-
-    # Tally jj_error 7 as separately
-    if ["Empty vis text", "jj_error 7a"] in err_l: jj_7a_l.append(url)
-    if ["Empty vis text", "jj_error 7b"] in err_l: jj_7b_l.append(url)
+def tally_final_errors(desc_l, url, err_num, final_err_d):
+    if 'jj_final_error' in desc_l:
+        final_err_d[err_num].append(url)
+    return final_err_d
 
 
+def tally_fallbacks(desc_l, url, fallback_l):
+    if 'fallback_success' in desc_l:
+        fallback_l.append(url)
+    return fallback_l
 
 
-# Display error code summaries
-logger.info(f'\njj_error 1: Crawler')
-logger.info(f'jj_error 2: Non-HTML')
-logger.info(f'jj_error 3: Request timeout')
-logger.info(f'jj_error 4: HTTP 404 / 403')
-logger.info(f'jj_error 5: Other request')
-logger.info(f'jj_error 6: Unknown request')
-logger.info(f'jj_error 7: Empty vis text')
-logger.info(f'jj_error 8: Looper timeout')
-logger.info(f'jj_error 9: Unknown looper')
+def tally_error_7(err_l, jj_7a_l, jj_7b_l):
+    if ["Empty vis text", "jj_error 7a"] in err_l:
+        jj_7a_l.append(url)
+    if ["Empty vis text", "jj_error 7b"] in err_l:
+        jj_7b_l.append(url)
+    return jj_7a_l, jj_7b_l
 
 
-# Errorlog1 total errors
-logger.info(f'\n\n\n ------ Most recent errorlog: {using_l[0]} ------')
-total = 0
-max_val = max(len(x) for x in total_d.values())  # Length of longest value, most frequent error
-logger.info(f'\nTotal errors:')
-for k, v in total_d.items():
-    row = k + ':', len(v), '', '=' * int(len(v) * 100 / max_val)  # Determine number of chars to represent as a percent of max_val
-    logger.info(f'jj_error {"".join(str(word).ljust(4) for word in row)}')  # Format and pad each element in row list for pretty print
-    total += len(v)
-logger.info(f'total: {total}')
+def count_error_7_recoveries(jj_7a_l, jj_7b_l):
+    logger.info(f'\n\tEmpty vis text errors')
+    logger.info(f'7a tally: {len(jj_7a_l)}')
+    logger.info(f'7b tally: {len(jj_7b_l)}')
 
-# Errorlog1 final errors
-total = 0
-#max_val = max(len(x) for x in final_d.values())  ## uncomment to not use previous max_val and scale
-logger.info(f'\nFinal errors:')
-for k, v in final_d.items():
-    row = k + ':', len(v), '', '=' * int(len(v) * 100 / max_val)
-    logger.info(f'jj_error {"".join(str(word).ljust(4) for word in row)}')
-    total += len(v)
-logger.info(f'total: {total}')
+    recovered_urls = set(jj_7a_l) - set(jj_7b_l)
+    logger.info(f'Recovered vis text errors: {len(recovered_urls)}\n')
 
 
+def display_histogram_of_errors(name, err_d):
+    logger.info(f'\n\t{name} errors:')
+    total = 0
+    max_val = max(len(x) for x in err_d.values())  # Highest tally, most frequent error
+    for err_num, url_l in err_d.items():
+        error_tally = len(url_l)
+        total += error_tally
+        padded_tally = str(error_tally).ljust(4)  # ljust() is number of spaces to use for padding
+        percent_of_max = int(error_tally * 100 / max_val)  # Determine number of chars to represent the number of errors
+        bar = '=' * percent_of_max  # Char representation of bar
+        logger.info(f'jj_error {err_num}:  {padded_tally} {bar}')
+
+    logger.info(f'     total:  {total}')
 
 
-'''
-logger.info(f'\nEmpty vis text errors:')
-logger.info(f'jj_7a_tally:', len(jj_7a_l))
-logger.info(f'jj_7b_tally:', len(jj_7b_l))
-
-# URLs recovered from 7a error
-for i in jj_7a_l:
-    if not i in jj_7b_l: logger.info(fi)
-
-logger.info(f'jj_7c_tally:', len(jj_7c_l), '\n\n')
-
-# URLs recovered from 7b error
-for i in jj_7b_l:
-    if not i in jj_7c_l: logger.info(fi)
-'''
+def get_all_final_errors(all_errorlog_d):
+    final_err_l_d = {}  # Final errors for each errorlog
+    for date_name, errorlog in all_errorlog_d.items():
+        final_err_l_d[date_name] = []
+        for url, err_l in errorlog.items():
+            if 'jj_final_error' in err_l[-1]:
+                final_err_l_d[date_name].append(url)
+    return final_err_l_d
 
 
-fin_l_d = {}  # A list of final errors for each errorlog
-all_fin_l = []  # Use this to count how many times a URL appears in the given errorlogs
+def count_logging_levels(date_dir):
+    with open(date_dir[0] + '/log_file', 'r') as f:
+        log_file = f.read()
+
+    warning_count = log_file.count(' - WARNING - ')
+    error_count = log_file.count(' - ERROR - ')
+    critical_count = log_file.count(' - CRITICAL - ')
+
+    logger.info(f'\n\n\tLogging level counts')
+    logger.info(f'{"Warning:".ljust(9)} {warning_count}')
+    logger.info(f'{"Error:".ljust(9)} {error_count}')
+    logger.info(f'{"Critical:".ljust(9)} {critical_count}')
 
 
-# Put all final error URLs into one big list to find recurring error URLs
-for date_name, errorlog in all_d.items():
-    fin_l_d[date_name] = []
-    for url_k, entry_v in errorlog.items():
-        if 'jj_final_error' in entry_v[-1]:
-            fin_l_d[date_name].append(url_k)
-            all_fin_l.append(url_k)
+def count_final_errors(final_err_l_d):
+    logger.info(f'\n\n\n ------------ All errorlogs ------------')
+    logger.info(f'\nFinal errors:')
+    for date_name, url_l in final_err_l_d.items():
+        logger.info(f'{date_name}: {len(url_l)}')
 
 
-logger.info(f'Fallback to homepage successes: {len(fallback_l)}')
+def get_recurring_final_errors(final_err_l_d):
+    '''
+    recurring_errs_l = []
+    for url in list(final_err_l_d.values())[0]:  # use any list because url must be in all anyways
+        if all(url in errorlog for errorlog in final_err_l_d.values()):
+            recurring_errs_l.append(url)
+    '''
+
+    recurring_errs_l = list(set.intersection(*map(set, final_err_l_d.values())))
+
+    logger.info(f'\nRecurring final errors: {len(recurring_errs_l)} \n\n')
+    return recurring_errs_l
 
 
+def main():
+    num_files, date_dir = get_options()
+    all_errorlog_d = read_errorlogs(num_files, date_dir)
+    display_err_descriptions()
 
-# Number of final errors in each errorlog
-logger.info(f'\n\n\n ------ All errorlogs: {using_l} ------')
-logger.info(f'\nFinal errors:')
-for k, v in fin_l_d.items():
-    logger.info(f'{k}: {len(v)}')
+    # Analyse primary errorlog only
+    primary_errorlog = get_most_recent_errorlog(all_errorlog_d)
+    total_err_d, final_err_d = build_tally_lists(primary_errorlog)
+    display_histogram_of_errors('All', total_err_d)
+    display_histogram_of_errors('Final', final_err_d)
+    count_logging_levels(date_dir)
 
+    # Analyse all errorlogs
+    final_err_l_d = get_all_final_errors(all_errorlog_d)
+    count_final_errors(final_err_l_d)
+    recurring_errs_l = get_recurring_final_errors(final_err_l_d)
 
-
-# Find which URLs appear in all the errorlogs
-rec_errs_l = []
-for i in all_fin_l:
-    if all_fin_l.count(i) == num_files:
-        rec_errs_l.append(i)
-    elif all_fin_l.count(i) > num_files:
-        logger.info(f'\nthis should never happen\n')
-
-rec_errs_l = list(dict.fromkeys(rec_errs_l))  # remove dups
-
-# Display recurring final error URLs
-logger.info(f'\n\nRecurring final errors: {len(rec_errs_l)} \n\n')
-
-for i in rec_errs_l:
-    logger.info(f'{i}')
+    return recurring_errs_l
 
 
-
-
-
-with open(dater[0] + '/log_file', 'r') as f:
-    log_file = f.read()
-
-warning_count = log_file.count(' - WARNING - ')
-error_count = log_file.count(' - ERROR - ')
-critical_count = log_file.count(' - CRITICAL - ')
-
-logger.info(f'\nWarning count: {warning_count}')
-logger.info(f'Error count: {error_count}')
-logger.info(f'Critical count: {critical_count}')
-
-
-
+if __name__ == "__main__":
+    main()
 
 
 

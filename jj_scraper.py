@@ -62,16 +62,8 @@ class scrape_c:
 
 
     def __str__(self):
-        return f'''{self.org_name}
-            {self.workingurl}
-            {self.current_crawl_level}
-            {self.parent_url}
-            {self.jbw_type}
-            {self.workingurl_dup}
-            {self.req_attempt_num}
-            {self.domain}
-            {self.dup_domain}'''
-
+        #return f'''{self.org_name} {self.workingurl} {self.current_crawl_level} {self.parent_url} {self.jbw_type} {self.workingurl_dup} {self.req_attempt_num} {self.domain} {self.dup_domain}'''
+        return f'{self.__dict__}'
 
     # Get important attributes. useful for adding new workingo to queue
     def clean_return(self):
@@ -101,7 +93,6 @@ class scrape_c:
         except asyncio.QueueEmpty:
             logger.info(f'queue empty')
             scrape_c.all_done_d[task_id] = True
-            print(scrape_c.all_done_d)
             await asyncio.sleep(8)
 
         except Exception:
@@ -311,7 +302,7 @@ class scrape_c:
         html_path = os.path.join(org_path, url_path)[:254]  # max length is 255 chars
 
         # Make file content. Separate with ascii delim char
-        file_contents_s = f'{self.jbw_count} \x1f {self.browser} \x1f {self.vis_text}'
+        file_contents_s = f'{self.jbw_count} \x1f {self.vis_text}'
 
         # Write text to file
         with open(html_path, "w", encoding='ascii', errors='ignore') as write_html:
@@ -339,16 +330,23 @@ class requester_base:
             return False
 
 
+    def reduce_vis_text(self):
+        self.vis_text = re.sub(const.WHITE_REG, ' ', self.vis_text)  # Reduce excess whitespace with regex
+        self.vis_text = self.vis_text.replace('\x1f', '')  # Remove delim char for webserver
+        self.vis_text = self.vis_text.lower()
+
+
     # Check for minimum amount of content. ex soft 404
     def check_vis_text(self, scrap):
         logger.debug(f'begin check_vis_text {self.url}')
-        self.vis_text = re.sub(const.WHITE_REG, " ", self.vis_text).lower()  # Reduce excess whitespace with regex
+
+        self.reduce_vis_text()
 
         if len(self.vis_text) > const.EMPTY_CUTOFF:
             return True
         else:
-            logger.warning(f'jj_error 7: Empty vis text: {self.url} {len(self.vis_text)}')
-            add_errorurls(scrap, 'jj_error 7', 'Empty vis text', False)
+            logger.warning(f'jj_error 7{self.ec_char}: Empty vis text: {self.url} {len(self.vis_text)}')
+            add_errorurls(scrap, 'jj_error 7{self.ec_char}', 'Empty vis text', False)
 
             # Debug err7 by saving to separate dir
             url_path = parse.quote(self.url, safe=':')
@@ -390,14 +388,12 @@ class requester_base:
             add_errorurls(scrap, f'jj_error 3{self.ec_char}', 'Timeout', True)
 
         else:
-            logger.warning(f'jj_error 6{self.ec_char}: playwright error: {errex} {self.url} {sys.exc_info()[2].tb_lineno}')
+            logger.warning(f'jj_error 6{self.ec_char}: Requester error: {errex} {self.url} {sys.exc_info()[2].tb_lineno}')
             add_errorurls(scrap, f'jj_error 6{self.ec_char}', str(errex), True)
 
 
 
 class pw_req(requester_base):
-    #session = await async_playwright().start()
-    #brow = await session.chromium.launch(args=['--disable-gpu'])
 
     def __init__(self, scrap):
         self.name = 'pw'
@@ -474,7 +470,7 @@ class pw_req(requester_base):
 
 
 
-class pw_ping(pw_req):
+class pw_ping_req(pw_req):
     def __init__(self):
         scrap = scrape_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com')
         super().__init__(scrap)
@@ -576,7 +572,7 @@ def proceed(url) -> bool:
         return False
 
     # Exclude if the new_url is on the blacklist
-    if url_dup in blacklist.combined_l:
+    if url_dup in blacklist_c.combined_l:
         logger.info(f'Blacklist invoked: {url_dup}')
         checked_urls_d_entry(url_dup, 'Blacklist invoked')
         return False
@@ -643,7 +639,7 @@ def req_success(scrap):
     scrap.fallback_success()  # Check and update fallback
 
     scrap.count_jbws()
-    checked_urls_d_entry(scrap.workingurl_dup, scrap.jbw_count, scrap.browser)  # Update outcome in scrape_c.checked_urls_d
+    checked_urls_d_entry(scrap.workingurl_dup, scrap.jbw_count, scrap.browser)
 
     logger.debug(f'begin check_red {scrap}')
     if not scrap.check_red():  # Check if redirect URL has been processed already
@@ -708,33 +704,35 @@ async def create_req_sessions():
     static_req.session = aiohttp.ClientSession(timeout=timeout)
 
 
-# Check internet connectivity
+async def pw_ping():
+    logger.debug(f'pw ping begin')
+    try:
+        ping_requester = pw_ping_req()
+        await ping_requester.request_url()
+        
+        if ping_requester.resp.status == 200:
+            requester_base.req_pause = False
+            logger.debug(f'pw ping success')
+            return True
+        else:
+            raise Exception('pw ping error: {ping_requester.resp.status}')
+
+    except Exception:
+        logger.exception(f'__error ping:')
+        return False
+
+    finally:
+        await ping_requester.close_page()
+
+
+# Check internet connectivity. First with PW, then with bash
 async def ping_test():
     ping_tally = 0
     while True:
-        try:
-            logger.debug(f'pw ping begin')
-            ping_requester = pw_ping()
-            await ping_requester.request_url()
-            
-            if ping_requester.resp.status == 200:
-                requester_base.req_pause = False
-                logger.debug(f'pw ping success')
-                return
-            else:
-                raise Exception('pw ping fail')
+        if await pw_ping():
+            return
 
-        except Exception:
-            logger.exception(f'__error ping:')
-            ping_tally += 1
-
-        finally:
-            try:
-                await ping_requester.close_page()
-            except Exception:
-                logger.exception(f'ping: could not close context')
-
-        # Attempt Bash ping on PW failure
+        ping_tally += 1
         bash_ping_ret = await bash_ping()
 
         ## should restart pw not nic if bash succeeds but pw fails
@@ -829,8 +827,9 @@ async def check_mem():
 def display_prog():
     logger.info(f'\nProgress: {scrape_c.prog_count} of {scrape_c.total_count}')
     #logger.info(f'Browser{pw_req.brow._impl_obj._browser_type.name}')
+    logger.info(f'Pages per pw context:')
     for context in pw_req.brow.contexts:
-        logger.info(f'Open pages: {len(context.pages)} {context.pages}')
+        logger.info(f'{len(context.pages)} {context.pages}')
     logger.info(f'running tasks: {len(asyncio.all_tasks())}')
     logger.info(f'{const.SEMAPHORE=}')
     #prant('running tasks:', asyncio.all_tasks())
@@ -928,19 +927,26 @@ class bot_excluder:
 
 
     def can_request(self, url):
-        if all((ask_robots_txt(), check_domain_rate_limiter(), check_domain_occurrence_limiter())):
+        if not self.rp_exist():
+            logger.debug(f'rp not found: {url}')
+            return True
+        if all((self.ask_robots_txt(url), self.check_domain_rate_limiter(url), self.check_domain_occurrence_limiter(url))):
             return True
 
 
-    def ask_robots_txt(self):
+    def rp_exist(self):
         if self.rp and len(self.rp.__str__()) > 1:
-            if not self.rp.can_fetch('*', url):
-                logger.info(f'rp can not fetch: {url}')
-                return False
+            return True
+
+
+    def ask_robots_txt(self, url):
+        if not self.rp.can_fetch('*', url):
+            logger.info(f'rp can not fetch: {url}')
+            return False
         return True
 
 
-    def check_domain_rate_limiter(self):
+    def check_domain_rate_limiter(self, url):
         crawl_delay = self.rp.crawl_delay('*')
         if crawl_delay:
             time_elapsed = datetime.now().timestamp() - self.last_req_ts
@@ -948,14 +954,14 @@ class bot_excluder:
                 logger.info(f'rp crawl delay wait: {crawl_delay} {time_elapsed} {url}')
                 # put back in queue or wait
                 import time
-                time.sleep(crawl_delay - time_elapsed)
+                #time.sleep(crawl_delay - time_elapsed)
         return True
 
 
-    def check_domain_occurrence_limiter(self):
+    def check_domain_occurrence_limiter(self, url):
         if self.domain_count > const.DOMAIN_LIMIT:
             logger.info(f'Domain limit exceeded: {url} {self.domain_count}')
-            checked_urls_d_entry(url_dup, 'Domain limit exceeded')
+            checked_urls_d_entry(dup_checker(url), 'Domain limit exceeded')
             return False
         return True
 
@@ -968,6 +974,7 @@ class bot_excluder:
                 rp_d = pickle.load(rp_file)
                 if bot_excluder.check_file_expiration(rp_d):
                     bot_excluder.domain_d = rp_d
+                    print(bot_excluder.domain_d)
         except Exception:
             logger.exception(f'RP file read failed:')
 
@@ -1025,13 +1032,14 @@ class blacklist_c:
 
 
     # Get recurring error URLs and add them to existing dict
-    def update_auto_blacklist(self):
-        for url in err_parse.rec_errs_l:
+    def update_auto_blacklist(self, recurring_errs_l):
+        for url in recurring_errs_l:
             url_dup = dup_checker(url)
             self.auto_blacklist_d[url_dup] = date.today().isoformat()
 
         with open(const.AUTO_BL_PATH, "w") as f:
             json.dump(self.auto_blacklist_d, f, indent=2)
+        logger.info(f'Auto blacklist updated')
 
 
 # Dirs for results
@@ -1135,8 +1143,8 @@ def init_queue(db, db_label):
 
             # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
             scrap = scrape_c(org_name, em_url, 0, homepage, db_label, url_dup)
-            proceed(em_url)  # respect robots.txt
-            scrape_c.all_urls_q.put_nowait(scrap)
+            if proceed(em_url):  # respect robots.txt
+                scrape_c.all_urls_q.put_nowait(scrap)
 
 
 
@@ -1155,7 +1163,7 @@ def display_stats():
     duration = datetime.now() - startTime
     logger.info(f'\n\nPages checked = {len(scrape_c.checked_urls_d)}')
     logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
-    logger.info(f'Pages/sec/tasks = {str((len(scrape_c.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
+    logger.info(f'Pages/sec/task = {str((len(scrape_c.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
 
 
 # Allow one URL to cover multiple orgs
@@ -1207,14 +1215,13 @@ def fallback_to_old_results():
         old_org_names_l = [os.path.basename(path) for path in glob(old_db_dir + '/*')]
 
         missing_orgs_l = set(old_org_names_l) - set(cur_org_names_l)
-        copy_old_results(db_name, missing_orgs_l)
-
-    logger.info(f'Files in /include_old: {len(glob(inc_old_dir))}')
+        copy_old_results(db_name, missing_orgs_l, old_db_dir)
 
 
 # Copy old org name dir to new include_old dir
-def copy_old_results(db_name, missing_orgs_l):
+def copy_old_results(db_name, missing_orgs_l, old_db_dir):
     inc_old_dir = os.path.join(const.RESULTS_PATH, 'include_old', db_name)
+    logger.info(f'Files in /include_old: {len(glob(inc_old_dir))}')
     for org_name in missing_orgs_l:
         inc_org_name_path = os.path.join(inc_old_dir, org_name)
 
@@ -1232,7 +1239,7 @@ def copy_old_results(db_name, missing_orgs_l):
 def send_to_server():
     #cmd_proc = subprocess.run(const.PUSH_RESULTS_PATH, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     #logging.info(cmd_proc.stdout.decode("utf-8"))  # decode bytes to str
-    logging.info(subprocess.getoutput(const.PUSH_RESULTS_PATH))
+    logger.info(subprocess.getoutput(const.PUSH_RESULTS_PATH))
 
 
 
@@ -1265,12 +1272,12 @@ def config_logger():
     logger.addHandler(f_handler)
     logger.addHandler(c_handler)
 
-
+'''
 # Handle uncaught exceptions
 def uncaught_handler(exctype, value, tb):
     logger.critical(f'------- UNCAUGHT {exctype}, {value}, {tb.tb_lineno}')
 sys.excepthook = uncaught_handler
-
+'''
 
 
 
@@ -1300,7 +1307,9 @@ if __name__ == '__main__':
     send_to_server()
 
     import err_parse
-    blacklist_o.update_auto_blacklist()
+    recurring_errs_l = err_parse.main()
+
+    blacklist_o.update_auto_blacklist(recurring_errs_l)
     make_human_readable(scrape_c.checked_urls_d, const.CHECKED_PATH)
     make_human_readable(scrape_c.error_urls_d, const.ERROR_PATH)
 
