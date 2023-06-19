@@ -26,7 +26,7 @@ DB_TYPES = ('civ', 'sch', 'uni')
 
 # Scraper options
 MAX_CRAWL_DEPTH = 1  # Webpage recursion depth
-SEMAPHORE = 12  # Num of concurrent tasks
+SEMAPHORE = 16  # Num of concurrent tasks
 EMPTY_CUTOFF = 200  # Num of characters in webpage text file to be considered empty
 DOMAIN_LIMIT = 20  # Max num of pages per domain
 
