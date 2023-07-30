@@ -23,20 +23,22 @@ from datetime import datetime, timedelta, date
 from playwright.async_api import async_playwright, TimeoutError
 from urllib import parse, robotparser
 import const
-
+import enlighten
 
 
 
 startTime = datetime.now()
 
 
+manager = enlighten.get_manager()
 
+ticks = manager.counter(total=100)
 
 
 
 
 # The webpage object
-class scrape_c:
+class Scrape:
     all_done_d = {}  # Each task states if the queue is empty
     prog_count = 0
     total_count = 0
@@ -62,8 +64,8 @@ class scrape_c:
 
 
     def __str__(self):
-        #return f'''{self.org_name} {self.workingurl} {self.current_crawl_level} {self.parent_url} {self.jbw_type} {self.workingurl_dup} {self.req_attempt_num} {self.domain} {self.dup_domain}'''
-        return f'{self.__dict__}'
+        return f'''{self.org_name=} {self.workingurl=} {self.current_crawl_level=} {self.parent_url=} {self.jbw_type=} {self.workingurl_dup=} {self.req_attempt_num=} {self.domain=} {self.dup_domain=}'''
+        #return f'{self.__dict__}'  # this returns huge html
 
     # Get important attributes. useful for adding new workingo to queue
     def clean_return(self):
@@ -76,8 +78,8 @@ class scrape_c:
         checked_urls_d_entry(scrap.workingurl_dup, None)  # Add new entry to CML
 
         try:
-            scrape_c.all_urls_q.put_nowait(scrap)
-            scrape_c.total_count += 1
+            Scrape.all_urls_q.put_nowait(scrap)
+            Scrape.total_count += 1
         except Exception:
             logger.exception(f'__Error trying to put into all_urls_q: {scrap}')
 
@@ -85,14 +87,14 @@ class scrape_c:
     # Get working list from queue
     async def get_scrap(task_id):
         try:
-            scrap = scrape_c.all_urls_q.get_nowait()
-            scrape_c.all_done_d[task_id] = False
+            scrap = Scrape.all_urls_q.get_nowait()
+            Scrape.all_done_d[task_id] = False
             logger.debug(f'got new working_list {scrap}')
             return scrap
 
         except asyncio.QueueEmpty:
             logger.info(f'queue empty')
-            scrape_c.all_done_d[task_id] = True
+            Scrape.all_done_d[task_id] = True
             await asyncio.sleep(8)
 
         except Exception:
@@ -105,14 +107,14 @@ class scrape_c:
         self.req_attempt_num += 1
         
         if self.req_attempt_num < 3:
-            return pw_req(self)
+            return PwReq(self)
 
         elif self.req_attempt_num < 5:
-            return static_req(self)
+            return StaticReq(self)
 
         else:
             logger.info(f'All retries exhausted: {self.workingurl} {self.req_attempt_num}')
-            scrape_c.prog_count += 1
+            Scrape.prog_count += 1
 
 
     # Mark errorlog portal url entry as successful fallback. ie: portal failed so now using homepage instead. don't count as portal error
@@ -120,9 +122,9 @@ class scrape_c:
         if self.current_crawl_level < 0:
             try:
                 logger.info(f'Homepage fallback success: Overwriting parent_url error: {self.parent_url}')
-                scrape_c.error_urls_d[self.parent_url][-1].append('fallback_success')
+                Scrape.error_urls_d[self.parent_url][-1].append('fallback_success')
             except KeyError:
-                logger.exception(f'__error parent url key not in scrape_c.error_urls_d {self.parent_url}')
+                logger.exception(f'__error parent url key not in Scrape.error_urls_d {self.parent_url}')
             except Exception:
                 logger.exception(f'__error:')
 
@@ -160,14 +162,14 @@ class scrape_c:
 
         if proceed(self.parent_url):
             logger.info(f'Using URL fallback: {self.parent_url}')
-            scrape_c.prog_count -= 1  ## undo progress count from final error
-            new_scrap = scrape_c(org_name = self.org_name,
+            Scrape.prog_count -= 1  ## undo progress count from final error
+            new_scrap = Scrape(org_name = self.org_name,
                 workingurl = self.parent_url,
                 current_crawl_level = -1,
                 parent_url = self.workingurl,
                 jbw_type = self.jbw_type,
                 workingurl_dup = dup_checker(self.parent_url))
-            scrape_c.add_to_queue(new_scrap)
+            Scrape.add_to_queue(new_scrap)
 
 
 
@@ -183,13 +185,13 @@ class scrape_c:
                     abspath = parse.urljoin(self.domain, anchor_tag.get('href'))
                     if proceed(abspath):
                         logger.info(f'Adding pagination url: {abspath} {self.workingurl}')
-                        new_scrap = scrape_c(org_name = self.org_name,
+                        new_scrap = Scrape(org_name = self.org_name,
                             workingurl = abspath,
                             current_crawl_level = self.current_crawl_level,  ##
                             parent_url = self.workingurl,
                             jbw_type = self.jbw_type,
                             workingurl_dup = dup_checker(abspath))
-                        scrape_c.add_to_queue(new_scrap)
+                        Scrape.add_to_queue(new_scrap)
 
                 # look for next page button represented by angle bracket
                 elif '>' in anchor_tag.text:
@@ -261,13 +263,13 @@ class scrape_c:
             # Check new URLs and append to queue
             for abspath in self.get_links():
                 if proceed(abspath):
-                    new_scrap = scrape_c(org_name = self.org_name,
+                    new_scrap = Scrape(org_name = self.org_name,
                         workingurl = abspath,
                         current_crawl_level = self.current_crawl_level,
                         parent_url = self.workingurl,
                         jbw_type = self.jbw_type,
                         workingurl_dup = dup_checker(abspath))
-                    scrape_c.add_to_queue(new_scrap)
+                    Scrape.add_to_queue(new_scrap)
 
         except Exception as errex:
             logger.exception(f'\njj_error 1: Crawler error detected. Skipping... {self}')
@@ -312,7 +314,7 @@ class scrape_c:
 
 
 # URL requesting super class
-class requester_base:
+class RequesterBase:
     req_pause = False  # Tell all tasks to wait if there is no internet connectivity
 
     def __init__(self, scrap):
@@ -393,7 +395,7 @@ class requester_base:
 
 
 
-class pw_req(requester_base):
+class PwReq(RequesterBase):
 
     def __init__(self, scrap):
         self.name = 'pw'
@@ -402,10 +404,10 @@ class pw_req(requester_base):
 
 
     async def get_page(self):
-        self.context = await pw_req.brow.new_context(ignore_https_errors=True)  ## slow execution here?
+        self.context = await PwReq.brow.new_context(ignore_https_errors=True)  ## slow execution here?
         self.page = await self.context.new_page()
         self.page.set_default_navigation_timeout(20000)
-        logger.debug(f'using brow: {pw_req.brow._impl_obj._browser_type.name}')
+        logger.debug(f'using brow: {PwReq.brow._impl_obj._browser_type.name}')
 
 
     async def request_url(self):
@@ -466,18 +468,18 @@ class pw_req(requester_base):
 
             
     async def close_session():
-        await pw_req.session.stop()
+        await PwReq.session.stop()
 
 
 
-class pw_ping_req(pw_req):
+class PwPingReq(PwReq):
     def __init__(self):
-        scrap = scrape_c('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com')
+        scrap = Scrape('ping_test', 'http://joesjorbs.com', 0, 'http://joesjorbs.com', 'ping_test', 'joesjorbs.com')
         super().__init__(scrap)
 
 
 
-class static_req(requester_base):
+class StaticReq(RequesterBase):
     
     def __init__(self, scrap):
         self.name = 'static'
@@ -485,7 +487,7 @@ class static_req(requester_base):
         super().__init__(scrap)
 
     async def request_url(self):
-        self.resp = await static_req.session.get(self.url, headers={'User-Agent': const.USER_AGENT_S}, ssl=False)
+        self.resp = await StaticReq.session.get(self.url, headers={'User-Agent': const.USER_AGENT_S}, ssl=False)
         self.status_text = f'{self.resp.status} {self.resp.reason}'
 
 
@@ -518,7 +520,7 @@ class static_req(requester_base):
 
 
     async def close_session():
-        await static_req.session.close()
+        await StaticReq.session.close()
 
 
 
@@ -537,17 +539,17 @@ def dup_checker(url):
 
 # Entrypoint into CML
 def checked_urls_d_entry(url_dup, *args):
-    scrape_c.checked_urls_d[url_dup] = args
+    Scrape.checked_urls_d[url_dup] = args
     logger.debug(f'Updated outcome for/with: {url_dup} {args}')
 
 
 # Get domain info and rp
 def get_robots_txt(url, url_dup):
     dup_domain = url_dup.split('/')[0]  # Excludes scheme and www
-    if dup_domain in bot_excluder.domain_d:  # Use cached robots.txt
-        return bot_excluder.domain_d[dup_domain]
+    if dup_domain in BotExcluder.domain_d:  # Use cached robots.txt
+        return BotExcluder.domain_d[dup_domain]
     else:
-        return bot_excluder(url, url_dup, dup_domain)  # Request robots.txt
+        return BotExcluder(url, url_dup, dup_domain)  # Request robots.txt
 
 
 # Determine if url should be requested
@@ -561,7 +563,7 @@ def proceed(url) -> bool:
     url_dup = dup_checker(url)
 
     # Exclude checked pages
-    if url_dup in scrape_c.checked_urls_d:
+    if url_dup in Scrape.checked_urls_d:
         logger.debug(f'Skipping: {url_dup}')
         return False
 
@@ -572,7 +574,7 @@ def proceed(url) -> bool:
         return False
 
     # Exclude if the new_url is on the blacklist
-    if url_dup in blacklist_c.combined_l:
+    if url_dup in Blacklist.combined_l:
         logger.info(f'Blacklist invoked: {url_dup}')
         checked_urls_d_entry(url_dup, 'Blacklist invoked')
         return False
@@ -583,7 +585,7 @@ def proceed(url) -> bool:
 
 # Wait until ping succeeds
 async def check_internet_connection():
-    while requester_base.req_pause:
+    while RequesterBase.req_pause:
         logger.warning(f'req_pause invoked')
         await asyncio.sleep(4)
 
@@ -594,11 +596,11 @@ async def req_looper():
     task_id = asyncio.current_task().get_name()
 
     # End looper when all tasks report empty queue
-    while not all(scrape_c.all_done_d.values()):
+    while not all(Scrape.all_done_d.values()):
         await check_internet_connection()
 
         # Get url from queue
-        scrap = await scrape_c.get_scrap(task_id)
+        scrap = await Scrape.get_scrap(task_id)
         if not scrap: continue
 
         requester = scrap.choose_requester(task_id)
@@ -630,10 +632,10 @@ async def req_looper():
 
 # After successful webpage retrieval
 def req_success(scrap):
-    scrape_c.prog_count += 1
+    Scrape.prog_count += 1
 
-    logger.debug(f'begin robots.txt update {scrap} {bot_excluder.domain_d[scrap.dup_domain]}')
-    bot_excluder.domain_d[scrap.dup_domain].update()  # Inc domain_count
+    logger.debug(f'begin robots.txt update {scrap} {BotExcluder.domain_d[scrap.dup_domain]}')
+    BotExcluder.domain_d[scrap.dup_domain].update()  # Inc domain_count
 
     logger.debug(f'begin fallback_success {scrap}')
     scrap.fallback_success()  # Check and update fallback
@@ -661,20 +663,20 @@ def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
     #err_desc = err_desc.replace(',', '').strip()  ## unn
 
     # First error for this url
-    if not workingurl in scrape_c.error_urls_d:
-        scrape_c.error_urls_d[workingurl] = [[org_name, jbw_type, current_crawl_level], [[err_desc, err_code]]]
+    if not workingurl in Scrape.error_urls_d:
+        Scrape.error_urls_d[workingurl] = [[org_name, jbw_type, current_crawl_level], [[err_desc, err_code]]]
 
     # Not the first error for this url
     else:
         try:
-            scrape_c.error_urls_d[workingurl][1].append([err_desc, err_code])
+            Scrape.error_urls_d[workingurl][1].append([err_desc, err_code])
         except Exception:
             logger.exception(f'Cant append error to errorlog: {workingurl}')
 
     # Add URL back to queue
     if back_in_q_b:
         logger.debug(f'Putting back into queue: {workingurl}')
-        scrape_c.all_urls_q.put_nowait(scrap)
+        Scrape.all_urls_q.put_nowait(scrap)
 
     # Add final_error flag to errorlog
     else:
@@ -688,8 +690,8 @@ def add_errorurls(scrap, err_code, err_desc, back_in_q_b):
 # Mark final errors in errorlog
 def final_error(scrap):
     try:
-        scrape_c.prog_count += 1
-        scrape_c.error_urls_d[scrap.workingurl].append(['jj_final_error'])
+        Scrape.prog_count += 1
+        Scrape.error_urls_d[scrap.workingurl].append(['jj_final_error'])
         scrap.homepage_fallback()
     except Exception:
         logger.exception(f'final_e __error: {scrap.workingurl} {sys.exc_info()[2].tb_lineno}')
@@ -697,21 +699,21 @@ def final_error(scrap):
 
 
 async def create_req_sessions():
-    pw_req.session = await async_playwright().start()
-    pw_req.brow = await pw_req.session.chromium.launch(args=['--disable-gpu'])
+    PwReq.session = await async_playwright().start()
+    PwReq.brow = await PwReq.session.chromium.launch(args=['--disable-gpu'])
     
     timeout = aiohttp.ClientTimeout(total=8)
-    static_req.session = aiohttp.ClientSession(timeout=timeout)
+    StaticReq.session = aiohttp.ClientSession(timeout=timeout)
 
 
 async def pw_ping():
     logger.debug(f'pw ping begin')
     try:
-        ping_requester = pw_ping_req()
+        ping_requester = PwPingReq()
         await ping_requester.request_url()
         
         if ping_requester.resp.status == 200:
-            requester_base.req_pause = False
+            RequesterBase.req_pause = False
             logger.debug(f'pw ping success')
             return True
         else:
@@ -739,7 +741,7 @@ async def ping_test():
         # Restart network interface on any two errors
         if ping_tally > 1 or bash_ping_ret != 0:
             logger.debug(f'check these {ping_tally} {bash_ping_ret}')
-            requester_base.req_pause = True
+            RequesterBase.req_pause = True
             await restart_nic()
 
 
@@ -803,10 +805,10 @@ async def save_progress():
     try:
         # Pickle queue of scraps
         with open(const.QUEUE_PATH, "wb") as f:
-            pickle.dump(scrape_c.all_urls_q, f)
+            pickle.dump(Scrape.all_urls_q, f)
 
         # CML, errorlog, and multiorg
-        for each_path, each_dict in (const.CHECKED_PATH, scrape_c.checked_urls_d), (const.ERROR_PATH, scrape_c.error_urls_d), (const.MULTI_ORG_D_PATH, scrape_c.multi_org_d):
+        for each_path, each_dict in (const.CHECKED_PATH, Scrape.checked_urls_d), (const.ERROR_PATH, Scrape.error_urls_d), (const.MULTI_ORG_D_PATH, Scrape.multi_org_d):
             with open(each_path, "w") as f:
                 json.dump(each_dict, f)
                 
@@ -823,23 +825,21 @@ async def check_mem():
         logger.error(f'\n Memory usage too high \n')
 
 
-# Display progress
 def display_prog():
-    logger.info(f'\nProgress: {scrape_c.prog_count} of {scrape_c.total_count}')
-    #logger.info(f'Browser{pw_req.brow._impl_obj._browser_type.name}')
-    logger.info(f'Pages per pw context:')
-    for context in pw_req.brow.contexts:
-        logger.info(f'{len(context.pages)} {context.pages}')
-    logger.info(f'running tasks: {len(asyncio.all_tasks())}')
-    logger.info(f'{const.SEMAPHORE=}')
+    #logger.info(f'\nProgress: {Scrape.prog_count} of {Scrape.total_count}')
+    #logger.info(f'Browser{PwReq.brow._impl_obj._browser_type.name}')
+    #logger.info(f'running tasks: {len(asyncio.all_tasks())}')
     #prant('running tasks:', asyncio.all_tasks())
-
+    ticks.count = Scrape.prog_count
+    ticks.total = Scrape.total_count
+    ticks.refresh()
+    
 
 # Start async tasks
 async def run_scraper():
     for i in range(const.SEMAPHORE):
         task = asyncio.create_task(req_looper())
-        scrape_c.all_done_d[task.get_name()] = False
+        Scrape.all_done_d[task.get_name()] = False
 
 
 # Run housekeeping funcs and display progress
@@ -856,14 +856,14 @@ async def maintenance():
         await asyncio.sleep(8)
 
 
-# Main event loop
 async def main():
     logger.info(f'\n Program Start')
+    logger.info(f'{const.SEMAPHORE=}')
     await create_req_sessions()
     await run_scraper()
 
     # Wait for scraping to finish
-    while not all(scrape_c.all_done_d.values()):
+    while not all(Scrape.all_done_d.values()):
         await maintenance()
 
     # Scrape complete
@@ -874,11 +874,11 @@ async def main():
 # Close browser sessions
 async def cleanup():
     try:
-        await pw_req.brow.close()
+        await PwReq.brow.close()
     except Exception:
         logger.exception(f'\ncant close pw brow')
 
-    for req_class in requester_base.__subclasses__():
+    for req_class in RequesterBase.__subclasses__():
         try:
             await req_class.close_session()
         except Exception:
@@ -888,7 +888,7 @@ async def cleanup():
 
 # robots.txt and domain tracker used for rate limiting
 # robots.txts are requested before any url from that domain enter the queue
-class bot_excluder:
+class BotExcluder:
     import ssl
     ssl._create_default_https_context = ssl._create_unverified_context  # rp.read req can throw error
     domain_d = {}  # Holds all robots.txts
@@ -910,7 +910,7 @@ class bot_excluder:
             self.rp = None
 
         # Store rp so it is requested only once
-        bot_excluder.domain_d[dup_domain] = self
+        BotExcluder.domain_d[dup_domain] = self
 
 
     def set_robots_txt_path(self, url):
@@ -966,15 +966,15 @@ class bot_excluder:
         return True
 
 
-    # Reuse old robots.txts to populate bot_excluder.domain_d
+    # Reuse old robots.txts to populate BotExcluder.domain_d
     def read_file():
-        bot_excluder.domain_d = {}  # Default to empty
+        BotExcluder.domain_d = {}  # Default to empty
         try:
             with open(const.RP_PATH, 'rb') as rp_file:
                 rp_d = pickle.load(rp_file)
-                if bot_excluder.check_file_expiration(rp_d):
-                    bot_excluder.domain_d = rp_d
-                    print(bot_excluder.domain_d)
+                if BotExcluder.check_file_expiration(rp_d):
+                    BotExcluder.domain_d = rp_d
+                    print(BotExcluder.domain_d)
         except Exception:
             logger.exception(f'RP file read failed:')
 
@@ -997,12 +997,12 @@ class bot_excluder:
     # Save this immediately because robots.txts expire and it's slow to req them all
     def write_file():
         with open(const.RP_PATH, 'wb') as rp_file:
-            pickle.dump(bot_excluder.domain_d, rp_file)
+            pickle.dump(BotExcluder.domain_d, rp_file)
         logger.info(f'RP file written')
 
 
 
-class blacklist_c:
+class Blacklist:
     
     # Combine recurring errors file and static blacklist
     def __init__(self):
@@ -1014,7 +1014,7 @@ class blacklist_c:
             self.auto_blacklist_d = {}
 
         self.purge_auto_blacklist()
-        blacklist_c.combined_l = const.STATIC_BLACKLIST + tuple(self.auto_blacklist_d)
+        Blacklist.combined_l = const.STATIC_BLACKLIST + tuple(self.auto_blacklist_d)
 
 
     # Remove expired entries
@@ -1062,23 +1062,23 @@ def make_dirs():
 def recover_prog():
     # pickle queue of class objs
     with open(const.QUEUE_PATH, "rb") as f:
-        scrape_c.all_urls_q = pickle.load(f)
-    scrape_c.total_count = scrape_c.all_urls_q.qsize()
+        Scrape.all_urls_q = pickle.load(f)
+    Scrape.total_count = Scrape.all_urls_q.qsize()
     
     # errorlog as dict
     with open(const.ERROR_PATH, "r") as f:
-        scrape_c.error_urls_d = json.load(f)
+        Scrape.error_urls_d = json.load(f)
     logger.info(f'errorlog recovery complete')
 
     # CML as dict
     with open(const.CHECKED_PATH, "r") as f:
-        scrape_c.checked_urls_d = json.load(f)
+        Scrape.checked_urls_d = json.load(f)
     logger.info(f'CML recovery complete')
 
     # multi_org_d as dict
     with open(const.MULTI_ORG_D_PATH, "r") as f:
-        scrape_c.multi_org_d = json.load(f)
-    logger.info(f'scrape_c.multi_org_d recovery complete')
+        Scrape.multi_org_d = json.load(f)
+    logger.info(f'Scrape.multi_org_d recovery complete')
 
     logger.info(f'Progress recovery successful')
 
@@ -1087,17 +1087,17 @@ def recover_prog():
 def start_fresh():
     logger.info(f'Using an original queue')
 
-    scrape_c.checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
-    scrape_c.error_urls_d = {}  # URLs that have resulted in an error
-    scrape_c.multi_org_d = {'civ': {}, 'sch': {}, 'uni': {}}  # Nested dicts for multiple orgs covered by a URL
-    scrape_c.all_urls_q = asyncio.Queue()
+    Scrape.checked_urls_d = {}  # URLs that have been checked and their outcome (jbw conf, redirect, or error)
+    Scrape.error_urls_d = {}  # URLs that have resulted in an error
+    Scrape.multi_org_d = {'civ': {}, 'sch': {}, 'uni': {}}  # Nested dicts for multiple orgs covered by a URL
+    Scrape.all_urls_q = asyncio.Queue()
 
     civ_db, sch_db, uni_db = read_dbs()
 
     for db, db_label in (civ_db, 'civ'), (sch_db, 'sch'), (uni_db, 'uni'):
         init_queue(db, db_label)
 
-    scrape_c.total_count = scrape_c.all_urls_q.qsize()
+    Scrape.total_count = Scrape.all_urls_q.qsize()
 
 
 # Get starting urls from file
@@ -1136,15 +1136,15 @@ def init_queue(db, db_label):
 
         # If that url is already in queue then mark it as multi org. After scraper copy results to all other orgs using that url
         try:
-            scrape_c.multi_org_d[db_label][url_dup].append(org_name)  # Not first org using this URL
+            Scrape.multi_org_d[db_label][url_dup].append(org_name)  # Not first org using this URL
             logger.debug(f'Putting in multi org dict: {em_url}')
         except KeyError:
-            scrape_c.multi_org_d[db_label][url_dup] = [org_name]  # First org using this URL
+            Scrape.multi_org_d[db_label][url_dup] = [org_name]  # First org using this URL
 
             # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
-            scrap = scrape_c(org_name, em_url, 0, homepage, db_label, url_dup)
+            scrap = Scrape(org_name, em_url, 0, homepage, db_label, url_dup)
             if proceed(em_url):  # respect robots.txt
-                scrape_c.all_urls_q.put_nowait(scrap)
+                Scrape.all_urls_q.put_nowait(scrap)
 
 
 
@@ -1161,16 +1161,16 @@ def make_human_readable(arg_dict, path):
 # Stop timer and display stats
 def display_stats():
     duration = datetime.now() - startTime
-    logger.info(f'\n\nPages checked = {len(scrape_c.checked_urls_d)}')
+    logger.info(f'\n\nPages checked = {len(Scrape.checked_urls_d)}')
     logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
-    logger.info(f'Pages/sec/task = {str((len(scrape_c.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
+    logger.info(f'Pages/sec/task = {str((len(Scrape.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
 
 
 # Allow one URL to cover multiple orgs
 def multi_org_copy():
     file_count = 0
     org_count = 0
-    for db_type, url_d in scrape_c.multi_org_d.items():
+    for db_type, url_d in Scrape.multi_org_d.items():
         for url, org_names_l in url_d.items():
 
             # URL is used by more than one org
@@ -1244,7 +1244,7 @@ def send_to_server():
 
 
 # Append asyncio task id if available to log
-class context_filter(logging.Filter):
+class ContextFilter(logging.Filter):
     def filter(self, record):
         try:
             record.task_id = f'- {asyncio.current_task().get_name()}'
@@ -1262,7 +1262,7 @@ def config_logger():
     f_handler.setLevel(logging.DEBUG)
     f_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s %(task_id)s', datefmt='%H:%M:%S')
     f_handler.setFormatter(f_format)
-    f_handler.addFilter(context_filter())
+    f_handler.addFilter(ContextFilter())
 
     c_handler = logging.StreamHandler()
     c_handler.setLevel(logging.INFO)
@@ -1285,8 +1285,8 @@ sys.excepthook = uncaught_handler
 if __name__ == '__main__':
     make_dirs()
     config_logger()
-    blacklist_o = blacklist_c()
-    bot_excluder.read_file()
+    blacklist_o = Blacklist()
+    BotExcluder.read_file()
 
     # Resume scraping using leftover results from the previously failed scraping attempt
     try:
@@ -1296,7 +1296,7 @@ if __name__ == '__main__':
         logger.info(f'{errex}')
         start_fresh()
         
-    bot_excluder.write_file()  ## call this after scraper or immediatly after rp gets updated?
+    BotExcluder.write_file()  ## call this after scraper or immediatly after rp gets updated?
 
     asyncio.run(main(), debug=False)
 
@@ -1310,9 +1310,8 @@ if __name__ == '__main__':
     recurring_errs_l = err_parse.main()
 
     blacklist_o.update_auto_blacklist(recurring_errs_l)
-    make_human_readable(scrape_c.checked_urls_d, const.CHECKED_PATH)
-    make_human_readable(scrape_c.error_urls_d, const.ERROR_PATH)
-
+    make_human_readable(Scrape.checked_urls_d, const.CHECKED_PATH)
+    make_human_readable(Scrape.error_urls_d, const.ERROR_PATH)
 
 
 
