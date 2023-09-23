@@ -20,6 +20,7 @@
 
 from glob import glob
 import json
+import os
 import sys
 import logging
 
@@ -124,7 +125,7 @@ def build_tally_lists(primary_errorlog):
         final_err_d = tally_final_errors(desc_l, url, last_err_num, final_err_d)
 
         fallback_l = tally_fallbacks(desc_l, url, fallback_l)
-        jj_7a_l, jj_7b_l = tally_error_7(err_l, jj_7a_l, jj_7b_l)
+        jj_7a_l, jj_7b_l = tally_error_7(err_l, jj_7a_l, jj_7b_l, url)
 
     logger.info(f'\nFallback to homepage successes: {len(fallback_l)}')
     count_error_7_recoveries(jj_7a_l, jj_7b_l)
@@ -151,7 +152,7 @@ def tally_fallbacks(desc_l, url, fallback_l):
     return fallback_l
 
 
-def tally_error_7(err_l, jj_7a_l, jj_7b_l):
+def tally_error_7(err_l, jj_7a_l, jj_7b_l, url):
     if ["Empty vis text", "jj_error 7a"] in err_l:
         jj_7a_l.append(url)
     if ["Empty vis text", "jj_error 7b"] in err_l:
@@ -194,7 +195,8 @@ def get_all_final_errors(all_errorlog_d):
 
 
 def count_logging_levels(date_dir):
-    with open(date_dir[0] + '/log_file', 'r') as f:
+    log_file = os.path.join(date_dir[0], 'log_file')
+    with open(log_file, 'r') as f:
         log_file = f.read()
 
     warning_count = log_file.count(' - WARNING - ')
@@ -225,6 +227,8 @@ def get_recurring_final_errors(final_err_l_d):
     recurring_errs_l = list(set.intersection(*map(set, final_err_l_d.values())))
 
     logger.info(f'\nRecurring final errors: {len(recurring_errs_l)} \n\n')
+    #for i in recurring_errs_l: print(i)
+        
     return recurring_errs_l
 
 
@@ -250,7 +254,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
