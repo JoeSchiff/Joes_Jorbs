@@ -37,7 +37,7 @@ BLACKLIST_EXPIRATION_DAYS = 60
 
 # Scraper options
 MAX_CRAWL_DEPTH = 1  # Webpage recursion depth
-SEMAPHORE = 16  # Num of concurrent tasks
+SEMAPHORE = 24  # Num of concurrent tasks
 EMPTY_CUTOFF = 200  # Num of characters in webpage text file to be considered empty
 DOMAIN_LIMIT = 20  # Max num of pages per domain
 HTTP_RETRY_ERROR_CODES = (403, 404)
@@ -70,7 +70,6 @@ WHITE_REG = re.compile("\s{2,}")
 STYLE_REG = re.compile("(display\s*:\s*(none|block);?|visibility\s*:\s*hidden;?)")
 CLASS_REG = re.compile('(hidden-sections?|dropdown|has-dropdown|sw-channel-dropdown|dropdown-toggle)')
  
-
 
 
 
