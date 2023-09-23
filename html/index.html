@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<title>Joe's Jorbs</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"> <!--Adjust page width to device display-->
+<link rel="shortcut icon" href="#">
+
+
+<style>
+
+/* All body elements */
+body {
+  background-color: #0a1010;
+  text-align: center;
+  color: white;
+  font-family: Arial;
+  font-size: 20px;
+}
+
+/* The main foreground rectangle containing active elements */
+#user_form {
+  background-color: #132020;
+  margin: 80px auto;
+  padding: 25px;
+  /*width: 70%;*/
+  min-width: 250px;
+  max-width: 800px;
+}
+
+/* Input fields */
+.input_long {
+  padding: 10px;
+  font-size: 18px;
+  border: 1px solid #aaaaaa;
+  background-color: #ffffff;
+  width: 70%;
+}
+
+/* Input fields */
+.input_short {
+  padding: 10px;
+  font-size: 18px;
+  border: 1px solid #aaaaaa;
+  background-color: #ffffff;
+  width: 150px;
+}
+
+/* Hide all tabs by default */
+.tab {
+  display: none;
+}
+
+/* Prev and next buttons */
+button {
+  background-color: #446e6e;
+  color: #ffffff;
+  border: none;
+  padding: 10px 20px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+/* Change prev and next button when cursor is hovering */
+button:hover {
+  opacity: 0.8;
+}
+
+/* Mark completed step icons */
+#prevBtn {
+  background-color: #446e6e;
+}
+
+/* Make circle icons that indicate the steps */
+.step {
+  height: 15px;
+  width: 15px;
+  margin: 0 2px;
+  background-color: #bfd7d7;
+  border: none;
+  border-radius: 50%;
+  display: inline-block;
+  opacity: 0.5;
+}
+
+/* Mark current step icon */
+.step.active {
+  opacity: 1;
+}
+
+/* Mark the steps that are finished and valid */
+.step.finish {
+  background-color: #446e6e;
+}
+
+/* Increase checkbox size */
+input.largerCheckbox {
+  width: 24px;
+  height: 24px;
+}
+
+/* Disable text selection to prevent highlighting text when clicking on label */
+.noselect {
+  -webkit-touch-callout: none; /* iOS Safari */
+    -webkit-user-select: none; /* Safari */
+     -khtml-user-select: none; /* Konqueror HTML */
+       -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version, currently
+                                  supported by Chrome and Opera */
+}
+
+/* The "please wait" modal event */
+.modal {
+  display: none; /* Hidden by default */
+  position: fixed; /* Stay in place */
+  z-index: 1; /* Sit on top */
+  padding-top: 200px; /* Location of the box */
+  left: 0;
+  top: 0;
+  width: 100%; /* Full width */
+  height: 100%; /* Full height */
+  overflow: auto; /* Enable scroll if needed */
+  background-color: rgb(0,0,0); /* Fallback color */
+  background-color: rgba(0,0,0,0.8); /* Black w/ opacity */
+}
+
+/* Modal content */
+.modal-content {
+  background-color: #c6d3d3;
+  margin: auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 50%;
+  color: black;
+  font-size: 24px;
+}
+
+/* Make hyperlinks white */
+a {color: white;}
+
+</style>
+</head>
+
+
+
+<body>
+
+<!-- Welcome banner -->
+<h2>Joe's Jorbs</h2>
+<h3>Find jobs in New York State</h3>
+
+
+<!-- Form to be submitted -->
+<form id="user_form" action="/cgi-bin/results.py">
+
+
+  <!-- Database selection tab -->
+  <div class="tab" id="db_tab">
+		<div id="db_text"><h3>Select at least one to search</h3></div><br>
+
+        <!-- Use larger checkbox style, disable text selection, and use label to mark checkbox -->
+		<p class="noselect"><label><input type="checkbox" class="largerCheckbox" name="civ_cb" id="civ_id" value="True"> Local Governments&hairsp; &emsp; &emsp;</label><br><br></p>
+		<p class="noselect"><label><input type="checkbox" class="largerCheckbox" name="sch_cb" id="sch_id" value="True"> Public School Districts &emsp;</label><br><br></p>
+		<p class="noselect"><label><input type="checkbox" class="largerCheckbox" name="uni_cb" id="uni_id" value="True"> Colleges and Universities</label></p>
+  </div>
+
+
+  <!-- Keyword input tab -->
+  <div class="tab" id="keyword_tab">
+		<h3>Search for a job title</h3>
+		<h4>Input multiple job titles using the "Enter" button</h4><br>
+    <p><input type="text" class="input_long" id="keyword_input" placeholder="Example: librarian" name="kw_form" value=""></p>
+    <button type="button" onclick="enter_keyword()">Enter another</button>
+    <!-- This input tag is read by the CGI script -->
+    <input id="inputted_list" name="kw_list" type="hidden" value="">
+    <!-- This div tag is just for displaying -->
+    <br><br>Searching for: <div id="inputted_div"></div>
+  </div>
+
+
+  <!-- ZIP code input tab -->
+  <div class="tab" id="zip_tab">
+		<h3>Enter a ZIP code to search near</h3>
+		<h4>This will be used to search only the job postings near you</h4>
+		<h4>Leave blank to search all of NYS</h4><br>
+    <p><input class="input_short" placeholder="Example: 14020" name="zip_form" maxlength=5></p>
+    <!-- This input tag is read by the CGI script -->
+    <input id="coords_id" name="coords_form" type="hidden" value="">
+  </div>
+
+
+  <!-- Range input tab -->
+  <div class="tab" id="range_tab">
+		<h3>Enter the maximum distance (in miles) to search</h3><br>
+    <p><input class="input_short" placeholder="Example: 50" name="range_form" maxlength=6></p>
+  </div>
+
+
+  <!-- Position next and prev buttons -->
+  <br><div style="overflow:auto;">
+
+    <div style="float: left;">
+      <button type="button" id="prevBtn" onclick="change_current_tab(-1)">Previous</button>
+    </div>
+
+    <div style="float: right;">
+      <button type="button" id="nextBtn" onclick="change_current_tab(1)">Next</button>
+    </div>
+  </div>
+
+
+  <!-- Hidden fuzzy matching option -->
+  <label id="fuzz_id" title="Fuzzy matching allows for slight differences in spelling to still match.&#10;&#10;For example: 'Correctional Officer' will match 'Corrections Officer'&#10;&#10;Fuzzy matching may dramatically increase how long the search takes."><input type="checkbox" name="fuzz_cb" value="True"> Fuzzy matching</label>
+
+
+  <!-- Circle icons which indicate the steps of the form -->
+  <br><br><div style="text-align:center;margin-top:4px;">
+    <span class="step"></span>
+    <span class="step"></span>
+    <span class="step"></span>
+    <span class="step"></span>
+  </div>
+
+</form>
+
+
+<!-- The "please wait" modal -->
+<div id="wait_modal" class="modal">
+      <div class="modal-content">
+        <p>Now searching. Please wait ...</p>
+      </div>
+</div>
+
+
+
+
+
+
+
+
+<script type="module">
+// type="module" is needed for import.
+// it invokes strict mode and changes scope. "window." indicates global scope.
+// I tried using separate <script> tags but that makes sharing vars (ex: zip_obj) impossible.
+import { zip_obj } from './zips.js';
+window.change_current_tab = change_current_tab;
+window.enter_keyword = enter_keyword;
+
+
+var currentTab = 0;
+showTab(currentTab); // Display the first tab
+
+// Clear hidden input field to prevent residue from persisting after page refresh
+document.getElementById("inputted_list").value = "";
+
+// Placeholder for displaying the keyword array
+document.getElementById("inputted_div").innerHTML = '<br>';
+
+
+
+// Get the keyword input value(s)
+var keyword_arr = [];
+function enter_keyword() {
+    const keyword_input = document.getElementById("keyword_input");
+    var keyword_input_value = keyword_input.value;
+    keyword_input_value = keyword_input_value.replace(/[\x00-\x1F]+/g, '');  // Remove non printed characters
+
+    // Forbid and mark empty keyword input as invalid
+    if (keyword_input_value.trim() === "") {
+        mark_invalid(keyword_input);
+
+    // Accept all other input
+    } else {
+        mark_valid(keyword_input);
+
+        keyword_arr.push(keyword_input_value + "\x1f"); // Append keyword and non printed delimter to array
+
+        keyword_input.value = ''; // Clear the input field
+
+        // Display the array's contents so far
+        var vis_keyword_arr = keyword_arr.join(', '); // Comma-separated keyword array
+        document.getElementById("inputted_div").innerHTML = vis_keyword_arr;
+        keyword_input.focus();
+
+        // Put the array into an input tag so its value can be read in the CGI script
+        document.getElementById("inputted_list").value = keyword_arr;
+    }
+}
+
+
+
+// Display the specified tab
+function showTab(tab_num) {
+    const tab_elem = document.getElementsByClassName("tab");
+    tab_elem[tab_num].style.display = "block";
+
+    // Don't display prev button on first tab
+    if (tab_num === 0) {
+        document.getElementById("prevBtn").style.display = "none";
+    } else {
+        document.getElementById("prevBtn").style.display = "inline";
+    }
+
+    // Display fuzzy matching option only on keyword page
+    if (tab_num === 1) {
+        document.getElementById("fuzz_id").style.display = "block";
+    } else {
+        document.getElementById("fuzz_id").style.display = "none";
+    }
+
+    // Change next button to "Submit" on last tab
+    if (tab_num === (tab_elem.length - 1)) {
+        document.getElementById("nextBtn").innerHTML = "Submit";
+    } else {
+        document.getElementById("nextBtn").innerHTML = "Next";
+    }
+
+    // Update step indicator
+    update_step_indicator(tab_num);
+}
+
+
+function change_current_tab(inc) {
+    const tab_elem = document.getElementsByClassName("tab");
+
+    // Stop if any field is invalid
+    if (inc === 1 && !validation_driver()) return false;
+
+    tab_elem[currentTab].style.display = "none";  // Hide the current tab
+    currentTab = currentTab + inc;
+
+    // End of the form
+    if (currentTab >= tab_elem.length) {
+        submit_form();
+
+    } else {
+        showTab(currentTab);
+        tab_elem[currentTab].getElementsByTagName("input")[0].focus(); }  // Focus on first input field
+}
+
+
+// Click next button when enter key is pressed
+document.onkeydown = function(event) {
+    if (event.keyCode === 13) {
+        document.getElementById("nextBtn").click();
+    }
+};
+
+
+function validate_db_tab() {
+    const civ_check = document.getElementById("civ_id").checked;
+    const sch_check = document.getElementById("sch_id").checked;
+    const uni_check = document.getElementById("uni_id").checked;
+    const db_text = document.getElementById("db_text");
+
+    // Mark invalid if no DB is selected
+    if (civ_check === false && sch_check === false && uni_check === false) {
+        mark_invalid(db_text);
+        return false;  // Set the current valid status to false
+
+    // Use valid color
+    } else {
+        mark_valid(db_text);
+        return true;
+      }
+}
+
+
+function validate_keyword_tab(input_field) {
+    //const keyword_arr = document.getElementById("inputted_list").value;
+    // Mark invalid if empty keyword input and array
+    if (input_field.value.trim() === "" && keyword_arr.length === 0) {
+        mark_invalid(input_field);
+        return false;
+
+    } else {
+        mark_valid(input_field);
+        return true; }
+}
+
+
+
+function validate_zip_tab(input_field) {
+    const zip_input = input_field.value;
+
+    // Submit form if ZIP input is blank
+    if (zip_input === "") {
+        submit_form();
+
+    } else {
+        // Mark invalid if ZIP input is not in the ZIP object
+        const zip_coords = zip_obj[zip_input];
+        if (typeof zip_coords == "undefined") {
+            mark_invalid(input_field);
+            return false;
+
+        } else { input_field.className = "input_short"; }
+            // Put the coords into an input tag so its value can be read in the CGI script
+            document.getElementById("coords_id").value = zip_coords;
+            mark_valid(input_field);
+            return true;
+        }
+}
+
+
+function validate_range_tab(input_field) {
+    // Mark invalid if range input contains a non interger
+    const regex_int = new RegExp(/\D/);
+    if (regex_int.test(input_field.value)) {
+        mark_invalid(input_field);
+        return false;
+    } else { return true;}
+}
+
+
+function mark_invalid(elem) {
+    if (elem.nodeName === "INPUT") {
+        elem.setAttribute("style", "background-color: #ffc4c4;");
+        elem.focus();
+
+    } else if (elem.nodeName === "DIV") {
+        elem.setAttribute("style", "color: #ff9191;"); }
+}
+
+
+function mark_valid(elem) {
+    if (elem.nodeName === "INPUT") {
+        elem.setAttribute("style", "background-color: #ffffff;");
+
+    } else if (elem.nodeName === "DIV") {
+        elem.setAttribute("style", "color: #ffffff;"); }
+
+}
+
+
+// Validate the form fields
+function validation_driver() {
+    const tab_elem = document.getElementsByClassName("tab");
+    const input_field = tab_elem[currentTab].getElementsByTagName("input")[0]; // Use first input field
+    const tab_id = tab_elem[currentTab].id;
+    var is_valid = true;
+
+    if (tab_id == "db_tab") {
+        is_valid = validate_db_tab();
+
+    } else if (tab_id == "keyword_tab") {
+        is_valid = validate_keyword_tab(input_field);
+
+    } else if (tab_id == "zip_tab") {
+        is_valid = validate_zip_tab(input_field);
+
+    } else if (tab_id == "range_tab") {
+        is_valid = validate_range_tab(input_field); }
+
+
+    // If the valid status is true, mark the step icon as finished and valid
+    if (is_valid) { document.getElementsByClassName("step")[currentTab].className += " finish"; }
+
+    return is_valid;
+}
+
+
+
+function update_step_indicator(n) {
+    // Remove the "active" class of all steps
+    var i, x = document.getElementsByClassName("step");
+    for (i = 0; i < x.length; i++) {
+        x[i].className = x[i].className.replace(" active", "");
+    }
+
+    // Add the "active" class on the current step
+    x[n].className += " active";
+}
+
+
+function submit_form() {
+    document.getElementById("wait_modal").style.display = "block";  // Display modal
+    document.getElementById("user_form").submit();
+}
+
+
+
+</script>
+
+
+<!-- Link to help page */ -->
+<a href="/help.html">Help</a><br><br>
+
+</body>
+</html>
+
+
+
+
+
+
+
