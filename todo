@@ -1,14 +1,36 @@
 
 errors:
+results.py error tab org listed for each url
+progress was not being saved. prob cuz sync func was awaited. err parser had no file +
 progress lower than total at end
 rp not found: https://www.madisoncounty.ny.gov/robots.txt
 autobl always uses todays date. recurring final errors are not being skipped?  + proceed() was not being respected in init_queue()
 call bot_excluder.write_file after scraper or immediatly after rp gets updated?
+child frame error never has errex
+prevent url from being put back in queue due to rate limit and immediately retrieved (loop) +
+    detect low q size +
+        just wait +
+    detect which url was recently put back into q -
 
 
 todo:
+black formatter
+progress always visible +
+    with bar! +
+    use previous total count as estimate? -
+concurrent robots fetch. after queue.get, not before queue.put? - it will be blocking anywhere cuz its not async?
+why init_q puts directly into q instead of add_to_q?
+clean up url, url_dup, domain, and dup_domain (with/without scheme and www). should be small funcs +
+respect 429 too many reqs and rp rate limit
+    if 429 then what? double crawl_delay?
+    put back in queue
+        how handle if all urls in q must wait?
+        separate func for rate limiting? before req, not before add to q +
+reduce log size +
+check mem unn +
+remove cml
 recover q loses all working urls. keep track of current urls being requested and combine with q prior to writing to file?
-rewrite errorlog
+rewrite errorlog without nested lists
     class inst to be more descriptive?
     init with empty lists?
     put all minor errors into new jj error
@@ -60,7 +82,6 @@ remove
     scrap.browser: only used for cml and file contents. should be requester not browser
     multiorg: results.py doesnt show duplicate urls
     CML
-    clear_brows, brow_l: only 1 brow needed since pw stable +
     bash_ping, restart_nic
 
 logging module
