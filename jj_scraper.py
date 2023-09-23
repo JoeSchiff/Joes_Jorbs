@@ -7,33 +7,29 @@
 
 import aiohttp
 import asyncio
-from glob import glob
+import enlighten
 import json
 import logging
 import os
 import pickle
-import psutil
 import re
 import shutil
-import sys
+import ssl
 import subprocess
+import sys
+import time
 import timeout_decorator
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, date
+from glob import glob
 from playwright.async_api import async_playwright, TimeoutError
 from urllib import parse, robotparser
 import const
-import enlighten
+
 
 
 
 startTime = datetime.now()
-
-
-manager = enlighten.get_manager()
-
-ticks = manager.counter(total=100, leave=False)
-
 
 
 
@@ -51,8 +47,8 @@ class Scrape:
         self.jbw_type = jbw_type
         self.workingurl_dup = workingurl_dup
         self.req_attempt_num = 0
-        self.domain = '://'.join(parse.urlparse(workingurl)[:2])  # Includes scheme and www. Used for building abspaths from rel links
-        self.dup_domain = workingurl_dup.split('/')[0]  # Used for domain limiter
+        self.domain = get_domain(workingurl)
+        self.domain_dup = get_domain_dup(workingurl)  # Used for domain limiter
 
         # Select jbw list. Used for weighing confidence and finding links
         if self.jbw_type == 'civ':
@@ -64,10 +60,10 @@ class Scrape:
 
 
     def __str__(self):
-        return f'''{self.org_name=} {self.workingurl=} {self.current_crawl_level=} {self.parent_url=} {self.jbw_type=} {self.workingurl_dup=} {self.req_attempt_num=} {self.domain=} {self.dup_domain=}'''
+        return f'''{self.org_name=} {self.workingurl=} {self.current_crawl_level=} {self.parent_url=} {self.jbw_type=} {self.workingurl_dup=} {self.req_attempt_num=} {self.domain=} {self.domain_dup=}'''
         #return f'{self.__dict__}'  # this returns huge html
 
-    # Get important attributes. useful for adding new workingo to queue
+    # Get important attributes. useful for adding new scrap to queue
     def clean_return(self):
         return self.org_name, self.workingurl, self.current_crawl_level, self.parent_url, self.jbw_type, self.workingurl_dup, self.req_attempt_num
 
@@ -101,7 +97,21 @@ class Scrape:
             logger.exception(f'QUEUE __ERROR:')
             await asyncio.sleep(8)
             
-
+            
+    def check_domain_rate_limiter(self):
+        domain_tracker = get_robots_txt(self.workingurl, self.workingurl_dup)
+        time_to_wait = domain_tracker.get_rate_limit_wait()
+        if time_to_wait > 0:
+            if Scrape.all_urls_q.qsize() < 2 * const.SEMAPHORE:  # Prevent high frequency put and get loop
+                logger.debug(f'Small queue detected {Scrape.all_urls_q.qsize()=}. Waiting ...')
+                time.sleep(time_to_wait)
+            else:
+                logger.debug(f'Putting back into queue: {self.workingurl}')
+                Scrape.all_urls_q.put_nowait(self)
+                return False
+        return True
+        
+        
     # Choose requester based on attempt number
     def choose_requester(self, task_id):
         self.req_attempt_num += 1
@@ -134,7 +144,7 @@ class Scrape:
 
         # Redirected
         if self.workingurl != self.red_url:
-            red_url_dup = dup_checker(self.red_url)
+            red_url_dup = get_url_dup(self.red_url)
 
             # Prevent trivial changes (eg: https upgrade) from being viewed as different urls
             if self.workingurl_dup != red_url_dup:
@@ -148,7 +158,7 @@ class Scrape:
                 checked_urls_d_entry(self.workingurl_dup, conf_val, self.browser)
 
                 # Skip checked pages using redirected URL
-                return proceed(self.red_url)
+                return allow_into_q(self.red_url)
 
         # Return True on all other results
         return True
@@ -160,7 +170,7 @@ class Scrape:
         if self.current_crawl_level != 0:
             return
 
-        if proceed(self.parent_url):
+        if allow_into_q(self.parent_url):
             logger.info(f'Using URL fallback: {self.parent_url}')
             Scrape.prog_count -= 1  ## undo progress count from final error
             new_scrap = Scrape(org_name = self.org_name,
@@ -168,7 +178,7 @@ class Scrape:
                 current_crawl_level = -1,
                 parent_url = self.workingurl,
                 jbw_type = self.jbw_type,
-                workingurl_dup = dup_checker(self.parent_url))
+                workingurl_dup = get_url_dup(self.parent_url))
             Scrape.add_to_queue(new_scrap)
 
 
@@ -183,14 +193,14 @@ class Scrape:
 
                     # Add to queue
                     abspath = parse.urljoin(self.domain, anchor_tag.get('href'))
-                    if proceed(abspath):
+                    if allow_into_q(abspath):
                         logger.info(f'Adding pagination url: {abspath} {self.workingurl}')
                         new_scrap = Scrape(org_name = self.org_name,
                             workingurl = abspath,
                             current_crawl_level = self.current_crawl_level,  ##
                             parent_url = self.workingurl,
                             jbw_type = self.jbw_type,
-                            workingurl_dup = dup_checker(abspath))
+                            workingurl_dup = get_url_dup(abspath))
                         Scrape.add_to_queue(new_scrap)
 
                 # look for next page button represented by angle bracket
@@ -262,13 +272,13 @@ class Scrape:
 
             # Check new URLs and append to queue
             for abspath in self.get_links():
-                if proceed(abspath):
+                if allow_into_q(abspath):
                     new_scrap = Scrape(org_name = self.org_name,
                         workingurl = abspath,
                         current_crawl_level = self.current_crawl_level,
                         parent_url = self.workingurl,
                         jbw_type = self.jbw_type,
-                        workingurl_dup = dup_checker(abspath))
+                        workingurl_dup = get_url_dup(abspath))
                     Scrape.add_to_queue(new_scrap)
 
         except Exception as errex:
@@ -322,7 +332,7 @@ class RequesterBase:
 
 
     # Exclude forbidden content types. ex: pdf
-    def content_type_check(self, scrap):
+    def check_content_type(self, scrap):
         content_type = self.resp.headers['content-type']
         if 'text/html' in content_type:
             return True
@@ -340,15 +350,14 @@ class RequesterBase:
 
     # Check for minimum amount of content. ex soft 404
     def check_vis_text(self, scrap):
-        logger.debug(f'begin check_vis_text {self.url}')
-
+        #logger.debug(f'begin check_vis_text {self.url}')
         self.reduce_vis_text()
 
         if len(self.vis_text) > const.EMPTY_CUTOFF:
             return True
         else:
             logger.warning(f'jj_error 7{self.ec_char}: Empty vis text: {self.url} {len(self.vis_text)}')
-            add_errorurls(scrap, 'jj_error 7{self.ec_char}', 'Empty vis text', False)
+            add_errorurls(scrap, f'jj_error 7{self.ec_char}', 'Empty vis text', False)
 
             # Debug err7 by saving to separate dir
             url_path = parse.quote(self.url, safe=':')
@@ -407,7 +416,7 @@ class PwReq(RequesterBase):
         self.context = await PwReq.brow.new_context(ignore_https_errors=True)  ## slow execution here?
         self.page = await self.context.new_page()
         self.page.set_default_navigation_timeout(20000)
-        logger.debug(f'using brow: {PwReq.brow._impl_obj._browser_type.name}')
+        #logger.debug(f'using brow: {PwReq.brow._impl_obj._browser_type.name}')
 
 
     async def request_url(self):
@@ -420,12 +429,11 @@ class PwReq(RequesterBase):
 
 
     async def get_content(self):
-        logger.debug(f'begin frame loop: {self.url} {len(self.page.frames)}')
-
+        #logger.debug(f'begin frame loop: {self.url} {len(self.page.frames)}')
         # Main frame and child frame content
         try:
             self.html, self.vis_text = await asyncio.wait_for(self.get_iframes_content(self.page.main_frame), timeout=3)
-            logger.debug(f'end frame loop: {self.url}')
+            #logger.debug(f'end frame loop: {self.url}')
 
         # Fallback to no child frame content
         except Exception as errex:
@@ -487,8 +495,10 @@ class StaticReq(RequesterBase):
         super().__init__(scrap)
 
     async def request_url(self):
+        logger.info(f'begin req static {self.url}')
         self.resp = await StaticReq.session.get(self.url, headers={'User-Agent': const.USER_AGENT_S}, ssl=False)
         self.status_text = f'{self.resp.status} {self.resp.reason}'
+        logger.info(f'end req static {self.url}')
 
 
     async def get_content(self):
@@ -524,8 +534,8 @@ class StaticReq(RequesterBase):
 
 
 
-# Removes extra info from urls to prevent duplicate pages from being checked more than once
-def dup_checker(url):
+# Remove unnecessary info from url
+def get_url_dup(url):
     url_dup = url.split('://')[1].split('#')[0]  # Remove scheme and fragments
 
     # Remove www subdomains. This works with variants like www3.
@@ -537,6 +547,16 @@ def dup_checker(url):
     return url_dup.lower()
 
 
+# Includes scheme and www.
+def get_domain(url):
+    return '://'.join(parse.urlparse(url)[:2])
+
+
+def get_domain_dup(url):
+    url_dup = get_url_dup(url)
+    return url_dup.split('/')[0]
+
+
 # Entrypoint into CML
 def checked_urls_d_entry(url_dup, *args):
     Scrape.checked_urls_d[url_dup] = args
@@ -545,22 +565,22 @@ def checked_urls_d_entry(url_dup, *args):
 
 # Get domain info and rp
 def get_robots_txt(url, url_dup):
-    dup_domain = url_dup.split('/')[0]  # Excludes scheme and www
-    if dup_domain in BotExcluder.domain_d:  # Use cached robots.txt
-        return BotExcluder.domain_d[dup_domain]
+    domain_dup = get_domain_dup(url)
+    if domain_dup in BotExcluder.domain_d:  # Use cached robots.txt
+        return BotExcluder.domain_d[domain_dup]
     else:
-        return BotExcluder(url, url_dup, dup_domain)  # Request robots.txt
+        return BotExcluder(url, domain_dup)  # Request robots.txt
 
 
-# Determine if url should be requested
-def proceed(url) -> bool:
+# Determine if url should be put in queue
+def allow_into_q(url) -> bool:
 
     # No scheme
     if not url.startswith('http://') and not url.startswith('https://'):
         logger.warning(f'__Error No scheme at: {url}')
-        return False  # Declare not to proceed
+        return False
 
-    url_dup = dup_checker(url)
+    url_dup = get_url_dup(url)
 
     # Exclude checked pages
     if url_dup in Scrape.checked_urls_d:
@@ -594,14 +614,14 @@ async def check_internet_connection():
 # Request loop
 async def req_looper():
     task_id = asyncio.current_task().get_name()
+    logger.info(f'Task begin')
 
     # End looper when all tasks report empty queue
     while not all(Scrape.all_done_d.values()):
         await check_internet_connection()
 
-        # Get url from queue
-        scrap = await Scrape.get_scrap(task_id)
-        if not scrap: continue
+        scrap = await Scrape.get_scrap(task_id)  # Get url from queue
+        if not scrap or not scrap.check_domain_rate_limiter(): continue
 
         requester = scrap.choose_requester(task_id)
         if not requester: continue
@@ -610,7 +630,7 @@ async def req_looper():
             await requester.request_url()
 
             if requester.resp.status == 200:
-                if not requester.content_type_check(scrap): continue
+                if not requester.check_content_type(scrap): continue
                 await requester.get_content()
                 if not requester.check_vis_text(scrap): continue
                 requester.add_html(scrap)
@@ -634,16 +654,16 @@ async def req_looper():
 def req_success(scrap):
     Scrape.prog_count += 1
 
-    logger.debug(f'begin robots.txt update {scrap} {BotExcluder.domain_d[scrap.dup_domain]}')
-    BotExcluder.domain_d[scrap.dup_domain].update()  # Inc domain_count
+    #logger.debug(f'begin robots.txt update {scrap} {BotExcluder.domain_d[scrap.domain_dup]}')
+    BotExcluder.domain_d[scrap.domain_dup].update()  # Inc domain_count
 
-    logger.debug(f'begin fallback_success {scrap}')
+    #logger.debug(f'begin fallback_success {scrap}')
     scrap.fallback_success()  # Check and update fallback
 
     scrap.count_jbws()
     checked_urls_d_entry(scrap.workingurl_dup, scrap.jbw_count, scrap.browser)
 
-    logger.debug(f'begin check_red {scrap}')
+    #logger.debug(f'begin check_red {scrap}')
     if not scrap.check_red():  # Check if redirect URL has been processed already
         return
 
@@ -800,7 +820,7 @@ async def restart_nic():
 
 
 # Write shared objects to file to save progress
-async def save_progress():
+def save_progress():
     logger.debug(f'begin prog save')
     try:
         # Pickle queue of scraps
@@ -818,55 +838,50 @@ async def save_progress():
         logger.exception(f'\n prog_f __ERROR: {sys.exc_info()[2].tb_lineno}')
 
 
-async def check_mem():
-    mem_use = psutil.virtual_memory()[2]
-    logger.info(f'Memory usage: {mem_use}')
-    if mem_use > 70:
-        logger.error(f'\n Memory usage too high \n')
+def create_prog_bar():
+    manager = enlighten.get_manager()
+    return manager.counter(total=1000, leave=False)
 
 
-def display_prog():
+def update_prog_bar(prog_bar):
     #logger.info(f'\nProgress: {Scrape.prog_count} of {Scrape.total_count}')
     #logger.info(f'Browser{PwReq.brow._impl_obj._browser_type.name}')
     #logger.info(f'running tasks: {len(asyncio.all_tasks())}')
     #prant('running tasks:', asyncio.all_tasks())
-    ticks.count = Scrape.prog_count
-    ticks.total = Scrape.total_count
-    ticks.refresh()
+    prog_bar.count = Scrape.prog_count
+    prog_bar.total = Scrape.total_count
+    prog_bar.refresh()
     
 
 # Start async tasks
 async def run_scraper():
+    logger.info(f'{const.SEMAPHORE=}')
     for i in range(const.SEMAPHORE):
         task = asyncio.create_task(req_looper())
         Scrape.all_done_d[task.get_name()] = False
 
 
-# Run housekeeping funcs and display progress
-async def maintenance():
+# Run housekeeping funcs
+async def maintenance(prog_bar):
+    await asyncio.sleep(10)
     try:
-        for intermittent_f in ping_test, check_mem, save_progress:
-            display_prog()
-            await asyncio.sleep(8)
-            await intermittent_f()  # save_progress and check_mem need to be async because ping_test is
-            await asyncio.sleep(8)
-
+        await ping_test()
+        save_progress()
+        update_prog_bar(prog_bar)
     except Exception:
         logger.exception(f'\nmaintenance __ERROR: {sys.exc_info()[2].tb_lineno}')
-        await asyncio.sleep(8)
+
 
 
 async def main():
-    logger.info(f'\n Program Start')
-    logger.info(f'{const.SEMAPHORE=}')
     await create_req_sessions()
     await run_scraper()
+    prog_bar = create_prog_bar()
 
     # Wait for scraping to finish
     while not all(Scrape.all_done_d.values()):
-        await maintenance()
+        await maintenance(prog_bar)
 
-    # Scrape complete
     logger.info(f'  Scrape complete  '.center(70, '='))
     await cleanup()
 
@@ -889,13 +904,12 @@ async def cleanup():
 # robots.txt and domain tracker used for rate limiting
 # robots.txts are requested before any url from that domain enter the queue
 class BotExcluder:
-    import ssl
     ssl._create_default_https_context = ssl._create_unverified_context  # rp.read req can throw error
     domain_d = {}  # Holds all robots.txts
 
     @timeout_decorator.timeout(8)
-    def __init__(self, url, url_dup, dup_domain):
-        logger.info(f'new domain: {dup_domain}')
+    def __init__(self, url, domain_dup):
+        logger.info(f'new domain: {domain_dup}')
         self.rp = robotparser.RobotFileParser()
         self.last_req_ts = 0.0
         self.domain_count = 0
@@ -906,15 +920,15 @@ class BotExcluder:
             self.rp.read()  # req
             logger.debug(f"rp printout: {self.rp.allow_all} {self.rp.disallow_all} {self.rp.can_fetch('*', '*')} {self.rp.url}")
         except Exception as errex :
-            logger.warning(f'__error: rp read: {dup_domain} {errex}')
+            logger.warning(f'__error: rp read: {domain_dup} {errex}')
             self.rp = None
 
         # Store rp so it is requested only once
-        BotExcluder.domain_d[dup_domain] = self
+        BotExcluder.domain_d[domain_dup] = self
 
 
     def set_robots_txt_path(self, url):
-        domain = '://'.join(parse.urlparse(url)[:2])  # Includes scheme and www.
+        domain = get_domain(url)
         self.rp.set_url(parse.urljoin(domain, "robots.txt"))
 
 
@@ -930,7 +944,7 @@ class BotExcluder:
         if not self.rp_exist():
             logger.debug(f'rp not found: {url}')
             return True
-        if all((self.ask_robots_txt(url), self.check_domain_rate_limiter(url), self.check_domain_occurrence_limiter(url))):
+        if all((self.ask_robots_txt(url), self.check_domain_occurrence_limiter(url))):
             return True
 
 
@@ -946,22 +960,20 @@ class BotExcluder:
         return True
 
 
-    def check_domain_rate_limiter(self, url):
+    def get_rate_limit_wait(self):
+        if not self.rp_exist():
+            return 0
         crawl_delay = self.rp.crawl_delay('*')
-        if crawl_delay:
-            time_elapsed = datetime.now().timestamp() - self.last_req_ts
-            if time_elapsed < crawl_delay:
-                logger.info(f'rp crawl delay wait: {crawl_delay} {time_elapsed} {url}')
-                # put back in queue or wait
-                import time
-                #time.sleep(crawl_delay - time_elapsed)
-        return True
+        if not crawl_delay:
+            return 0
+        time_elapsed = datetime.now().timestamp() - self.last_req_ts
+        return crawl_delay - time_elapsed
 
 
     def check_domain_occurrence_limiter(self, url):
         if self.domain_count > const.DOMAIN_LIMIT:
             logger.info(f'Domain limit exceeded: {url} {self.domain_count}')
-            checked_urls_d_entry(dup_checker(url), 'Domain limit exceeded')
+            checked_urls_d_entry(get_url_dup(url), 'Domain limit exceeded')
             return False
         return True
 
@@ -974,7 +986,7 @@ class BotExcluder:
                 rp_d = pickle.load(rp_file)
                 if BotExcluder.check_file_expiration(rp_d):
                     BotExcluder.domain_d = rp_d
-                    print(BotExcluder.domain_d)
+                    logger.info(BotExcluder.domain_d)
         except Exception:
             logger.exception(f'RP file read failed:')
 
@@ -1034,7 +1046,7 @@ class Blacklist:
     # Get recurring error URLs and add them to existing dict
     def update_auto_blacklist(self, recurring_errs_l):
         for url in recurring_errs_l:
-            url_dup = dup_checker(url)
+            url_dup = get_url_dup(url)
             self.auto_blacklist_d[url_dup] = date.today().isoformat()
 
         with open(const.AUTO_BL_PATH, "w") as f:
@@ -1132,7 +1144,7 @@ def init_queue(db, db_label):
         if not em_url: continue
         if em_url.startswith('_'): continue
 
-        url_dup = dup_checker(em_url)
+        url_dup = get_url_dup(em_url)
 
         # If that url is already in queue then mark it as multi org. After scraper copy results to all other orgs using that url
         try:
@@ -1143,7 +1155,7 @@ def init_queue(db, db_label):
 
             # Put org name, em URL, initial crawl level, homepage, and jbws type into queue
             scrap = Scrape(org_name, em_url, 0, homepage, db_label, url_dup)
-            if proceed(em_url):  # respect robots.txt
+            if allow_into_q(em_url):  # respect robots.txt
                 Scrape.all_urls_q.put_nowait(scrap)
 
 
@@ -1161,9 +1173,9 @@ def make_human_readable(arg_dict, path):
 # Stop timer and display stats
 def display_stats():
     duration = datetime.now() - startTime
-    logger.info(f'\n\nPages checked = {len(Scrape.checked_urls_d)}')
+    logger.info(f'\n\nPages checked = {Scrape.total_count}')
     logger.info(f'Duration = {round(duration.seconds / 60)} minutes')
-    logger.info(f'Pages/sec/task = {str((len(Scrape.checked_urls_d) / duration.seconds) / const.SEMAPHORE)[:4]} \n')
+    logger.info(f'Pages/sec/task = {str((Scrape.total_count / duration.seconds) / const.SEMAPHORE)[:4]} \n')
 
 
 # Allow one URL to cover multiple orgs
@@ -1304,14 +1316,16 @@ if __name__ == '__main__':
     multi_org_copy()
     fallback_to_old_results()
 
+    make_human_readable(Scrape.checked_urls_d, const.CHECKED_PATH)
+    make_human_readable(Scrape.error_urls_d, const.ERROR_PATH)
+    
     send_to_server()
 
     import err_parse
     recurring_errs_l = err_parse.main()
 
     blacklist_o.update_auto_blacklist(recurring_errs_l)
-    make_human_readable(Scrape.checked_urls_d, const.CHECKED_PATH)
-    make_human_readable(Scrape.error_urls_d, const.ERROR_PATH)
+
 
 
 
