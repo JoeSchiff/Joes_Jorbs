@@ -82,11 +82,10 @@ respect robots
 
 3.2 - ?
 replace prant with logging module
-major refactor
+major refactor with smaller funcs. including server side code
 polymorphic requester classes. requests, error handling, ping
 one pw browser. removed unnecessary brow restart behavior
-
-
+progress bar
 
 
 
