@@ -1,0 +1,243 @@
+
+errors:
+results.py error tab org listed for each url
+progress was not being saved. prob cuz sync func was awaited. err parser had no file +
+progress lower than total at end
+rp not found: https://www.madisoncounty.ny.gov/robots.txt
+autobl always uses todays date. recurring final errors are not being skipped?  + proceed() was not being respected in init_queue()
+call bot_excluder.write_file after scraper or immediatly after rp gets updated?
+child frame error never has errex
+prevent url from being put back in queue due to rate limit and immediately retrieved (loop) +
+    detect low q size +
+        just wait +
+    detect which url was recently put back into q -
+
+
+todo:
+black formatter
+progress always visible +
+    with bar! +
+    use previous total count as estimate? -
+concurrent robots fetch. after queue.get, not before queue.put? - it will be blocking anywhere cuz its not async?
+why init_q puts directly into q instead of add_to_q?
+clean up url, url_dup, domain, and dup_domain (with/without scheme and www). should be small funcs +
+respect 429 too many reqs and rp rate limit
+    if 429 then what? double crawl_delay?
+    put back in queue
+        how handle if all urls in q must wait?
+        separate func for rate limiting? before req, not before add to q +
+reduce log size +
+check mem unn +
+remove cml
+recover q loses all working urls. keep track of current urls being requested and combine with q prior to writing to file?
+rewrite errorlog without nested lists
+    class inst to be more descriptive?
+    init with empty lists?
+    put all minor errors into new jj error
+    cml_text = '{\n'   - what?
+
+
+
+index +
+  globals -
+    keyword_arr
+    currentTab
+  html validator: https://beautifytools.com/javascript-validator.php +
+  js camelcase naming convention
+  1. Always declare variables
+  2. Always use const if the value should not be changed
+  3. Always use const if the type should not be changed (Arrays and Objects)
+  4. Only use let if you can't use const
+  5. Only use var if you MUST support old browsers. var has function scope. let is block scope
+
+
+refactor
+    err parser +
+    index +
+    error funcs
+        can be in scrap or own class. child class?
+    back_in_q_b as sep func?
+    pw and aio sessions in their req class +
+    rename working_o to scrap +
+    results.py +
+
+
+results.py to do:
+    sort results by jbw_conf or percent simularity? can remove jbw conf from result files
+    dict or class instead of nested res_list
+    remove browser in each results file
+    reconsider skipping geodesic with high max_dist
+    optimise: two separate sections. one with geolimter function
+    remove zip_form? display purposes only. keep
+        why send coords from form? prevents double lookup
+    show jj_error num in tooltip on error tabs?
+    reword error pages to discourage refreshing?
+    sort errors by alpha?
+    percent decode urls?
+    wraparound text for mobile?
+
+
+remove
+    remove locks + operations are atomic, race condition not possible
+    scrap.browser: only used for cml and file contents. should be requester not browser
+    multiorg: results.py doesnt show duplicate urls
+    CML
+    bash_ping, restart_nic
+
+logging module
+    new id is assigned when using static reqs
+
+handle timeouts uniformly +
+  asyncio.TimeoutError not possible without wait_for?
+  check async timeout again
+  child frames
+
+respect robots.txt
+  does rp file have multiple dates? so how determine exiration?
+    when are new entries created?
+        which domains are scraped never change therfore only dates change? or new entries are made as scraper runs?
+  store rp files or make async
+  after success req: update timestamp and domain count +
+    after any req? not just success?
+  call proceed_f on initial urls +
+  default useragent
+  use 2 useragents to see difference?
+  pass rp into working_o?
+  implement domain rate limiter +
+      include timestamp of last req for that domain +
+        dict of domains: obj as value? +
+        save and recover +
+        global default rate limiter also
+
+
+auto blacklist
+    static bl is unn
+    blacklist is dup urls +
+    must be exact match, not domain. ex: 5il.co != 5il.co/page3
+    
+domain-wide jbw conf. Once high conf is established, ignore low conf links for that domain
+auto update dbs urls by sorting jbw conf from scraper
+  this wont get new orgs, only new em urls
+cleanup before release:
+  whitespace
+  unn comments
+
+pagination class never works. test 'next' or '>' test +
+set playwright user agent?
+use asyncio.Event() instead of blocking: all_done_d,l pw_pause, asyncio.sleep
+net::ERR_NAME_NOT_RESOLVED should also be 404
+include error result in working_o?
+need checked lock? - dup ensures a url is processed only once, therefore one task at a time
+check for malformed urls? >>> r=urlparse('http:/joesjorbs.com') >>> if r.scheme and r.netloc: print(99)
+redundant error 7
+  final or try with next reqer?
+discard head elem from html. page.inner_html('body')
+  resp.text vs page.inner_html vs page.text_content vs page.content() etc
+add redirect history to checked pages. can be done with aiohttp, cant find for pw
+parent url may not be in errorlog on first error - remove code
+
+update portals
+  allow multiple em urls for each org in db?
+      use urls from only same org. ex: dont use county url for town. diff orgs
+      error on any em url in list would call for fallback. implications?
+      city oswego, orleans, st lawco
+
+
+properly track skipped pages?
+put skipped pages into cml? might give dups
+"application" as bunkword?
+use empty list placeholder for jj_final_error and fallback_success in errorlog?
+errorlog as json?
+sort results to either regular dir or empty vis text dir (for debugging)
+fallback to domain after homeurl fallback?
+mark all nonlogged errors with underscore or remove try block
+use both a domain limiter and a limiter based on full url (except query)?
+create unique codes for all skips. print and mark in cml
+improve bunkwords: mark all skips in outcome. dont use list comprehension? print offending bunkword and context
+
+
+
+winter update project:
+  which scraper to use?
+  use double quotes. watch out for replacing possesive apostrophes
+  update em urls and home urls
+  search for new orgs
+  verify coords?
+document which orgs use a centralized service and exclude or include them from jj search. ie: applitrack/caboces, applitrack/penfield, etc
+dups in db. probably causes the dups found in cml? solved with multi org d?
+
+
+
+
+
+index.html to do:
+dup zip codes
+fix indents
+obfuscate -
+improve code comments
+zip_dict one entry per line?
+hide modal after back button without refresh - difficult
+show progress on modal - difficult
+  new modal over old for progress?
+create favicon
+
+
+to do later:
+search PDFs from webpages
+only firefox can detect pdf cleanly
+run scraper as cron job
+put all errors in add_errorurls_f. eg: __error. or use jj error 9 catch all for __errors?
+jbws back to count but limit to x occurrences?
+decompose nav tags?
+content of script tags not decomposing because Splash evaluates scripts. So there is no script tag header or footer for BS to read: https://recruiting.ultipro.com/BRY1002BSC/JobBoard/6b838b9a-cd2b-436a-903b-0de7b6e17b4f/?q=&o=postedDateDesc
+max crawl depth 3? either high or low conf jbws in tags? -
+remove non printable characters from result text? -
+weighted jbws
+upgrade server to 22.04
+charter schools http://www.p12.nysed.gov/psc/csdirectory/CSLaunchPage.html
+
+
+
+false positives: include keyword and date
+https://www.herkimer.edu/about/employment/
+https://hr.cornell.edu/jobs       librarian 1/20
+https://www.newvisions.org/pages/media-centers-for-the-21st-century
+https://www.tbafcs.org/Page/1444  nurse 2/20 dropdown
+
+
+All fallback types: static fb, portal to homepage fb, include_old fb
+
+
+Concerns:
+
+Dup checker: 
+remove after ampersand in query?
+remove fragments and trailing slash. yes
+case sensitivity. yes
+
+High conf: exclude good low conf links
+https://www.cityofnewburgh-ny.gov/civil-service = upcoming exams
+http://www.albanycounty.com/Government/Departments/DepartmentofCivilService.aspx = exam announcement
+have separate high conf jbw lists?
+accept links with only high conf job words?
+
+Bunkwords: search entire element or just contents?
+must search url to exclude .pdf, etc
+
+Decompose: drop down menus?
+dont decompose menus for anchor tag search +
+
+No space between elements' content in results
+caused by converting from soup to soup.text
+eg: Corporation Counsel</option><option>Downtown Parking Improvement
+produces this: developmentcorporation counseldowntown parking improvement planengineeringethics
+this shouldn't matter because a keyword probably won't span accross multiple elements
+
+use urllib or manual replace to percent encode urls?
+url_path = workingurl.replace('/', '%2F')  # or
+url_path = parse.quote(workingurl, safe=':')
+
+ 
+
+
+ 

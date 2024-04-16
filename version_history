@@ -1,0 +1,104 @@
+
+Bash - 11/18
+parellelization by writing URLs to disk then opening subshells on them
+multiple keywords
+spoof user agent
+open in browser
+prevent dups and checked pages
+
+
+
+1.0 - 4/19
+switch from Bash to Python
+multiprocessing
+write to error log
+domain limiter
+create DBs
+
+
+1.1 - 9/19
+separate CLI and GUI versions
+proper HTML parsing with BeautifulSoup
+search broader <p> tag for jbws
+decompose hidden elements
+separate high conf jbw lists
+always include pagination links
+Sel to confirm all keyword matches
+
+
+2.0 - 1/20
+website on local machine
+save HTML to text files
+Splash for dynamic webpages
+reorganize errorlog by URL first
+save CML and errorlog for resumption
+update DBs
+
+
+2.1 - 9/20
+website live on remote server
+empty visible HTML text detection
+domain limiter
+percent encode URLs
+dedicated email
+
+
+2.2 - 3/21
+Sel and static requesters as fallback
+move portals out of scraper file
+fuzzy matching keywords
+new errorlog using nested lists
+dedicated error parser
+move zip code coords out of results.py
+
+
+2.3 - 6/21
+multiple Splash instances to eradicate alleviate the plague
+allow sharing of results between multiple URLs of an org
+move logging out of start_scraper.sh to try prevent broken pipe plague error
+dedicated processes for manager tasks
+Splash soft 404s now detected as jj_error 4
+high / low jbw bug fixed. would allow links with high or low jbws
+domain limiter bug fixed. would only work on URLs with a query
+
+
+
+3.0 - 11/21
+replaced Splash with Playwright
+replaced multiproc with asyncio
+replaced Requests with aiohttp
+removed Selenium
+use list of em urls in DBs (no?)
+
+
+3.1 - 8/22
+replaced workinglist with class obj
+switched to pickle and json dump/load
+async subprocesses
+new nic reset (fixed borken pipe plague)
+auto blacklist
+respect robots
+
+
+3.2 - ?
+replace prant with logging module
+major refactor with smaller funcs. including server side code
+polymorphic requester classes. requests, error handling, ping
+one pw browser. removed unnecessary brow restart behavior
+progress bar
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
