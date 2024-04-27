@@ -15,6 +15,7 @@ Code dump for http://joesjorbs.com
 * skip checked pages
 * domain and rate limits
 * crawl links if they likely contain relevant content
+* crawl pagination links
 * save and resume progress
 * auto blacklist
 * errorlog with summary
