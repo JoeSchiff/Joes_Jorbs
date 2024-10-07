@@ -3,7 +3,7 @@ import re
 from datetime import date
 
 
-VERSION_PATH = "/home/joepers/code/jj_v3.2"
+VERSION_PATH = "/home/joepers/code/jj"
 CIV_DB_PATH = os.path.join(VERSION_PATH, "dbs/civ_db")
 SCH_DB_PATH = os.path.join(VERSION_PATH, "dbs/sch_db")
 UNI_DB_PATH = os.path.join(VERSION_PATH, "dbs/uni_db")
@@ -17,6 +17,7 @@ RESULTS_PATH = os.path.join(DATER_PATH, "results")
 QUEUE_PATH = os.path.join(DATER_PATH, "queue")
 CHECKED_PATH = os.path.join(DATER_PATH, "checked_pages")
 ERROR_PATH = os.path.join(DATER_PATH, "errorlog")
+DYNAMIC_DB_PATH = os.path.join(DATER_PATH, "dynamic_db")
 MULTI_ORG_D_PATH = os.path.join(DATER_PATH, "multi_org_d")
 LOG_PATH = os.path.join(DATER_PATH, "log_file")
 ERR7_PATH = os.path.join(DATER_PATH, "jj_error_7")
@@ -33,13 +34,20 @@ RP_EXPIRATION_DAYS = 180
 BLACKLIST_EXPIRATION_DAYS = 60
 
 
+# Timeouts
+pw_req_timeout = 20000  # ms
+iframe_timeout = 8
+static_timeout = 8
+ping_timeout = 5
+bot_excluder_timeout = 5
+
 # Scraper options
 MAX_CRAWL_DEPTH = 1  # Webpage recursion depth
-SEMAPHORE = 24  # Num of concurrent tasks
+SEMAPHORE = 8  # Num of concurrent tasks
 EMPTY_CUTOFF = 200  # Num of characters in webpage text file to be considered empty
 DOMAIN_LIMIT = 20  # Max num of pages per domain
-HTTP_RETRY_ERROR_CODES = (403, 404)
-USER_AGENT_S = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0"  ## used for only static req?
+NO_RETRY_HTTP_ERROR_CODES = (403, 404, 410)
+USER_AGENT_S = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"  ## used for only static req?
 
 
 # Exclude links that contain any of these. percent encodings must be lower case
@@ -102,6 +110,7 @@ STATIC_BLACKLIST = (
     "tompkinscivilservice.org/civilservice/jobs",
     "swedishinstitute.edu/employment-at-swedish-institute",
     "sunyacc.edu/job-listings",
+    "united.com",
 )
 
 # Include links that include any of these
@@ -197,10 +206,10 @@ JBWS_SU_X_LOW = (
 )  ## unused third tier?
 
 # Compile regex paterns for reducing whitespace in written files
-WHITE_REG = re.compile("\s{2,}")
+WHITE_REG = re.compile(r"\s{2,}")
 
 # Compile regex paterns for removing hidden HTML elements
-STYLE_REG = re.compile("(display\s*:\s*(none|block);?|visibility\s*:\s*hidden;?)")
+STYLE_REG = re.compile(r"(display\s*:\s*(none|block);?|visibility\s*:\s*hidden;?)")
 CLASS_REG = re.compile(
     "(hidden-sections?|dropdown|has-dropdown|sw-channel-dropdown|dropdown-toggle)"
 )
